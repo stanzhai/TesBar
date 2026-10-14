@@ -29,3 +29,10 @@ SwiftPM executable package（`TesBar`），`TeslaClient` 协议 + `VehicleSnapsh
 - 任何真 HTTP、Keychain、UI。
 
 ## Blocked by: (none)
+
+## Comments
+
+- Commit: e2eddfb (branch `ticket/01`, merged integration tip ddcbc7c — already up to date).
+- Files added: `Package.swift` (swift-tools-version 6.0, macOS 13+, executable `TesBar`, test target `TesBarTests`), `Sources/TesBar/main.swift` (placeholder print, replaced by menu UI in ticket 09), `Sources/TesBar/TeslaClient.swift` (protocol `TeslaClient`: listVehicles/vehicleData/wake/signAndSend/refreshAccessToken; `VehicleListEntry`; `VehicleSnapshot` with nested Charge/Climate/Doors + State + odometerKm + timestampMs; `VehicleCommand` with all ticket cases incl. `doorOpen/doorClose(Door)` for frunk/trunk/doors and `isDangerous` per ADR-0003), `Tests/TesBarTests/TeslaClientTests.swift`.
+- Test evidence: `swift build` zero errors; `swift test` → "Test run with 1 test in 0 suites passed" (single @Test decodes sample JSON into VehicleSnapshot/VehicleListEntry and checks command payload equality + isDangerous). CLT linker warnings about missing CommandLineTools search paths are environment noise, not package errors.
+- Deviations: doors/frunk/trunk modelled as one `Door` enum passed to `doorOpen/doorClose` instead of separate cases (payload carries which door; ADR-0003 dangerous set covered via `isDangerous`). Snapshot JSON field names are the app's canonical shape; ticket 05 maps Fleet API `charge_state`/`climate_state`/`vehicle_state` onto them.
