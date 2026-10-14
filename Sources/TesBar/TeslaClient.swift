@@ -125,3 +125,9 @@ public enum VehicleCommand: Sendable, Equatable {
         }
     }
 }
+
+/// 发令失败且属于 VCP 虚拟钥匙未配对（如 UNKNOWN_KEY_ID fault）：车辆拒绝执行任何签名指令。
+/// 05 的 FleetTeslaClient 解析到该 fault 时抛出；07 据此给出配对指引而非让用户反复重试。
+public struct VirtualKeyNotPairedError: Error, Sendable {
+    public init() {}
+}
