@@ -28,4 +28,20 @@ Type: task
   - `MessageFault` 从样例字节解码正确。
 - `swift build` 通过；全部测试串行跑（`--jobs 1`，CLT 插件竞态规避）。
 
+## Comments
+
+- Commit `24eb2e8` on `ticket/12` (+ merge commit `2f563b7` from `integration/tesbar-v1`): `Sources/TesBar/VCP/Protobuf.swift` (~476 lines), `Sources/TesBar/VCP/SessionCrypto.swift`, `Tests/TesBarTests/VCPCoreTests.swift` (13 tests).
+- Test evidence: `Test run with 19 tests in 1 suite passed` (13 new + 6 pre-existing); after merging `integration/tesbar-v1`: `Test run with 40 tests in 3 suites passed`. All with `swift build --jobs 1 && swift test --jobs 1`; TestingMacros plugin flake hit twice, cleared by `rm -rf .build; sleep 2; rebuild` per harness quirk.
+- Official vectors ported (protocol.md): ECDH K derivation (via real SecKey, Sx `6b9a28…f8b` → K `1b2fce19967b79db696f909cff89ea9a`), SESSION_INFO_KEY (`fceb679e…ce300`), session-info tag verify (`996c1fe3…ea002`, incl. negative tamper tests), metadata TLV examples byte-exact (`0203616263050400000064ff` and full session-info metadata), command metadata byte-exact (`0001 05 0101 03 …070400000002ff`), TX RoutableMessage debug bytes decode, hvacAuto payload `120452020801`.
+- Deviations from research notes (verified against upstream .proto files, which the ticket instructed):
+  - `KeyIdentity.public_key = 1` (notes guessed 2; actual proto reserves 2).
+  - `HMAC_Personalized_Signature_Data`: epoch=1, counter=2, **expires_at=3 (fixed32)**, tag=4 (notes guessed 4/5/6).
+  - `SignatureData.HMAC_Personalized_data = 8` (notes guessed 4); AES_GCM_Personalized=5, session_info_tag=6, AES_GCM_Response=9.
+  - `SessionInfo.clock_time = 4` is **fixed32** (wire type 5), not varint — decode added `readFixed32`.
+  - Uses `import CryptoKit` (CLT provides it; repo has no swift-crypto dependency for `import Crypto`).
+  - Apple SecKey private-key external format is `ENCODE_PUBLIC || scalar` (97B), not DER — `SecKeyCreateWithData` rejects standard SEC1 DER despite OpenSSL accepting it; verified by round-trip. Test-side vector importer uses the native format.
+  - proto3 defaults omitted on encode: `RKEAction.UNLOCK` (0) encodes to empty payload; `signatureType=0` omitted from TLV (matches official `SERIALIZE` example output `0203616263050400000064ff`).
+
+
+Status: ready-for-human
 ## Blocked by: (none)
