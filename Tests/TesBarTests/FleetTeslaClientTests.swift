@@ -222,7 +222,7 @@ struct FleetTeslaClientTests {
         let transport = FleetScriptedTransport(
             vehicle: vehicle, fleet: [.json(Self.listJSON), Self.ok])
         let (client, _, _) = try makeClient(transport, service: service)
-        try await client.signAndSend(command: command)
+        try await client.signAndSend(command: command, vehicleID: Self.vehicleID)
         let calls = transport.signedCommandCalls
         #expect(calls.count == 2)  // handshake + command
         return (try VehicleSim.requestMessage(try #require(calls.last?.body)), transport, vehicle)
@@ -267,8 +267,7 @@ struct FleetTeslaClientTests {
         #expect(abs(snap.charge.rangeKm - 148.2 * 1.609344) < 0.01)
         #expect(snap.charge.state == "Charging" && snap.charge.minutesToFull == 45)
         #expect(snap.climate.insideC == 21.5 && snap.climate.outsideC == 8.0)
-        #expect(snap.doors.locked && !snap.doors.frontTrunkOpen && snap.doors.rearTrunkOpen
-            && snap.doors.anyOpen)
+        #expect(snap.doors.locked == true && !snap.doors.frontTrunkOpen && snap.doors.rearTrunkOpen)
         #expect(abs(snap.odometerKm - 7974.1 * 1.609344) < 0.1)
         #expect(snap.state == .online && snap.timestampMs == 1_760_000_000_000)
         #expect(transport.calls.first?.url.hasSuffix("/vehicle_data") == true)
@@ -317,14 +316,15 @@ struct FleetTeslaClientTests {
             vehicle: VehicleSim(), fleet: [.json(Self.listJSON)])
         let (client, _, _) = try makeClient(transport)
         await #expect(throws: FleetError.self) {
-            try await client.signAndSend(command: .doorOpen(.frontLeft))
+            try await client.signAndSend(command: .doorOpen(.frontLeft), vehicleID: Self.vehicleID)
         }
         #expect(transport.signedCommandCalls.isEmpty)  // rejected before any POST
     }
 
-    @Test func hvacOnMapsToInfotainmentTemperatureBothZones() async throws {
+    @Test func hvacOnMapsToAutoStartPlusTemperatureBothZones() async throws {
         let (msg, _, _) = try await runCommand(.hvacOn(temperatureC: 21))
         #expect(msg.toDomain == .infotainment)
+        #expect(try Self.vehicleActionField(msg.payload!, 10) != Data())  // hvacAuto{on=true}
         let temps = try Self.hvacTemperatures(msg.payload!)
         #expect(temps.driver == 21 && temps.passenger == 21)
     }
@@ -388,8 +388,8 @@ struct FleetTeslaClientTests {
             vehicle: vehicle, fleet: [.json(Self.listJSON), Self.ok, Self.ok])
         let (client, _, _) = try makeClient(transport)
 
-        try await client.signAndSend(command: .lock)
-        try await client.signAndSend(command: .lock)
+        try await client.signAndSend(command: .lock, vehicleID: Self.vehicleID)
+        try await client.signAndSend(command: .lock, vehicleID: Self.vehicleID)
 
         let bodies = transport.signedCommandCalls.compactMap { $0.body }
         #expect(bodies.count == 3)  // handshake + 2 commands
@@ -405,7 +405,7 @@ struct FleetTeslaClientTests {
             vehicle: vehicle,
             fleet: [.json(Self.listJSON), Self.ok, .json(Self.listJSON), Self.ok])
         let (client, store, suite) = try makeClient(transport)
-        try await client.signAndSend(command: .lock)
+        try await client.signAndSend(command: .lock, vehicleID: Self.vehicleID)
 
         // Cold start: same UserDefaults + same persisted keypair → no handshake.
         let auth = AuthService(clientID: "cid", clientSecret: "s", transport: transport, keychain: store)
@@ -413,7 +413,7 @@ struct FleetTeslaClientTests {
             transport: transport, auth: auth,
             resolver: RegionResolver(defaults: UserDefaults(suiteName: "fleet-resolver-\(UUID().uuidString)")!),
             keys: VCPKeyManager(store: store), defaults: UserDefaults(suiteName: suite)!)
-        try await client2.signAndSend(command: .lock)
+            try await client2.signAndSend(command: .lock, vehicleID: Self.vehicleID)
 
         // handshake + command + (cold client) command: 3 posts, ONE handshake —
         // the persisted session (UserDefaults + keypair) survives the new instance.
@@ -432,7 +432,7 @@ struct FleetTeslaClientTests {
             fleet: [.json(Self.listJSON), .message(RoutableMessage(messageFault: .unknownKeyID))])
         let (client, _, _) = try makeClient(transport)
         await #expect(throws: VirtualKeyNotPairedError.self) {
-            try await client.signAndSend(command: .lock)
+            try await client.signAndSend(command: .lock, vehicleID: Self.vehicleID)
         }
     }
 
@@ -449,7 +449,7 @@ struct FleetTeslaClientTests {
             vehicle: vehicle, fleet: [.json(Self.listJSON)], handshakes: [.message(reply)])
         let (client, _, _) = try makeClient(transport)
         await #expect(throws: VirtualKeyNotPairedError.self) {
-            try await client.signAndSend(command: .lock)
+            try await client.signAndSend(command: .lock, vehicleID: Self.vehicleID)
         }
     }
 
@@ -459,7 +459,7 @@ struct FleetTeslaClientTests {
             fleet: [.json(Self.listJSON), .message(RoutableMessage(messageFault: .incorrectEpoch))])
         let (client, _, _) = try makeClient(transport)
         do {
-            try await client.signAndSend(command: .lock)
+            try await client.signAndSend(command: .lock, vehicleID: Self.vehicleID)
             Issue.record("expected vehicleRejected")
         } catch let e as FleetError {
             guard case .vehicleRejected = e else {
@@ -475,11 +475,11 @@ struct FleetTeslaClientTests {
             vehicle: vehicle,
             fleet: [.json(Self.listJSON), Self.ok, .faultWithFreshSession(.incorrectEpoch), Self.ok])
         let (client, _, _) = try makeClient(transport)
-        try await client.signAndSend(command: .lock)
+        try await client.signAndSend(command: .lock, vehicleID: Self.vehicleID)
 
         // Vehicle reboots: new epoch, counter 6→16.
         vehicle.reboot()
-        try await client.signAndSend(command: .lock)
+        try await client.signAndSend(command: .lock, vehicleID: Self.vehicleID)
 
         // The client can't know the epoch died until the fault arrives: cmd 2 goes
         // out on the stale session, the fault's fresh session info covers the one
@@ -499,7 +499,7 @@ struct FleetTeslaClientTests {
             fleet: [.json(Self.listJSON), .error(status: 422, body: "{}")])
         let (client, _, _) = try makeClient(transport)
         await #expect(throws: FleetError.protocolUnsupported) {
-            try await client.signAndSend(command: .lock)
+            try await client.signAndSend(command: .lock, vehicleID: Self.vehicleID)
         }
     }
 
@@ -509,7 +509,7 @@ struct FleetTeslaClientTests {
             fleet: [.json(Self.listJSON), .error(status: 503, body: "{}")])
         let (client, _, _) = try makeClient(transport)
         await #expect(throws: FleetError.vehicleNotAwake) {
-            try await client.signAndSend(command: .lock)
+            try await client.signAndSend(command: .lock, vehicleID: Self.vehicleID)
         }
 
         let transport2 = FleetScriptedTransport(
@@ -517,7 +517,7 @@ struct FleetTeslaClientTests {
             fleet: [.json(Self.listJSON), .error(status: 408, body: #"{"error":"vehicle is offline"}"#)])
         let (client2, _, _) = try makeClient(transport2, service: "com.tesbar.fleet-tests-2")
         await #expect(throws: FleetError.vehicleNotAwake) {
-            try await client2.signAndSend(command: .lock)
+            try await client2.signAndSend(command: .lock, vehicleID: Self.vehicleID)
         }
     }
 
@@ -531,7 +531,7 @@ struct FleetTeslaClientTests {
         let (client, store, _) = try makeClient(transport)
         try store.saveToken("rt1", for: AuthService.refreshAccount)
 
-        try await client.signAndSend(command: .lock)
+        try await client.signAndSend(command: .lock, vehicleID: Self.vehicleID)
 
         #expect(try store.readToken(AuthService.refreshAccount) == "rt2")
         #expect(try store.readToken(AuthService.accessAccount) == "at2")

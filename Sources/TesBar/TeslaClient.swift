@@ -6,7 +6,9 @@ public protocol TeslaClient: Sendable {
     func listVehicles() async throws -> [VehicleListEntry]
     func vehicleData(id: String) async throws -> VehicleSnapshot
     func wake(id: String) async throws
-    func signAndSend(command: VehicleCommand) async throws
+    /// `vehicleID` is the selected vehicle (multi-car story 16); implementations must
+    /// resolve it to a VIN, never silently fall back to another vehicle.
+    func signAndSend(command: VehicleCommand, vehicleID: String) async throws
     func refreshAccessToken() async throws
 }
 
@@ -66,14 +68,13 @@ public struct VehicleSnapshot: Sendable, Equatable, Codable {
     }
 
     public struct Doors: Sendable, Equatable, Codable {
-        public let locked: Bool
-        public let anyOpen: Bool
+        /// nil = 睡眠/离线拉不到 vehicle_state，未知而非"已锁"。
+        public let locked: Bool?
         public let frontTrunkOpen: Bool
         public let rearTrunkOpen: Bool
 
-        public init(locked: Bool, anyOpen: Bool, frontTrunkOpen: Bool, rearTrunkOpen: Bool) {
+        public init(locked: Bool?, frontTrunkOpen: Bool, rearTrunkOpen: Bool) {
             self.locked = locked
-            self.anyOpen = anyOpen
             self.frontTrunkOpen = frontTrunkOpen
             self.rearTrunkOpen = rearTrunkOpen
         }

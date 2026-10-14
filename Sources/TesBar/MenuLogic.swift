@@ -149,12 +149,13 @@ public enum StatusFormatting {
         return "\(Int(value.rounded()))\(fahrenheit ? "°F" : "°C")"
     }
 
-    /// 车门/锁/后备箱文案（故事 12）。
+    /// 车门/锁/后备箱文案（故事 12）。锁状态未知（睡眠/离线）时明示，不猜。
     public static func doors(_ doors: VehicleSnapshot.Doors) -> String {
-        var parts: [String] = [doors.locked ? "已锁车" : "未锁"]
+        var parts: [String] = [
+            doors.locked.map { $0 ? "已锁车" : "未锁" } ?? "锁状态未知",
+        ]
         if doors.frontTrunkOpen { parts.append("前备箱开") }
         if doors.rearTrunkOpen { parts.append("后备箱开") }
-        if doors.anyOpen { parts.append("有车门开") }
         return parts.joined(separator: " · ")
     }
 }

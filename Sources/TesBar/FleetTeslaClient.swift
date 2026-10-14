@@ -34,10 +34,8 @@ public actor FleetTeslaClient: TeslaClient {
     /// Per-VIN session managers. Sessions persist to UserDefaults; this map is only the
     /// in-process warm cache of managers.
     private var sessionManagers: [String: VCPSessionManager] = [:]
-    /// id → vin from the last listVehicles. signed_command is VIN-keyed and
-    /// ``TeslaClient/signAndSend(command:)`` carries no vehicle id.
-    // ponytail: single-vehicle spec — signAndSend targets the only/first listed vehicle;
-    // multi-car needs the selected vehicle id plumbed through TeslaClient.
+    /// id → vin from the last listVehicles (``TeslaClient/signAndSend(command:vehicleID:)``
+    /// is id-keyed; misses re-list).
     private var vins: [String: String] = [:]
     /// Random per-client routing address (Go: d.address).
     private let routingAddress = FleetTeslaClient.randomBytes(16)
@@ -88,13 +86,13 @@ public actor FleetTeslaClient: TeslaClient {
     }
 
     public func refreshAccessToken() async throws {
-        try await auth.refresh()
+        try await auth.ensureFreshAccessToken()
     }
 
     // MARK: TeslaClient — signed commands
 
-    public func signAndSend(command: VehicleCommand) async throws {
-        guard let vin = try await targetVIN() else { throw FleetError.noVehicle }
+    public func signAndSend(command: VehicleCommand, vehicleID: String) async throws {
+        guard let vin = try await vin(for: vehicleID) else { throw FleetError.noVehicle }
         let (domain, payload) = try encode(command)
         let manager = sessionManager(vin: vin)
 
@@ -153,6 +151,8 @@ public actor FleetTeslaClient: TeslaClient {
             return .success // OPERATIONSTATUS_OK: no fault = vehicle accepted
         }
         switch fault {
+        case .errorNone:
+            return .success
         case .unknownKeyID:
             throw VirtualKeyNotPairedError()
         case .invalidTokenOrCounter, .incorrectEpoch:
@@ -212,11 +212,11 @@ public actor FleetTeslaClient: TeslaClient {
         return manager
     }
 
-    /// VIN for signAndSend: the only cached one, else a fresh list's first entry
-    /// (single-vehicle spec; see `vins` ponytail note).
-    private func targetVIN() async throws -> String? {
-        if vins.count == 1, let only = vins.values.first { return only }
-        return try await listVehicles().first?.vin
+    /// VIN for the selected vehicle id (multi-car story 16); refreshes the id→vin map
+    /// from a fresh list on miss instead of guessing another vehicle.
+    private func vin(for vehicleID: String) async throws -> String? {
+        if let vin = vins[vehicleID] { return vin }
+        return try await listVehicles().first(where: { $0.id == vehicleID })?.vin
     }
 
     // MARK: VehicleCommand → domain + protobuf payload
@@ -248,11 +248,11 @@ public actor FleetTeslaClient: TeslaClient {
             throw FleetError.unsupportedCommand("individual doors cannot be actuated remotely")
         // Infotainment
         case let .hvacOn(temp):
-            // Setting driver/passenger temperature starts conditioning (auto_conditioning_start
-            // maps to hvacAuto without temperature; the temp-carrying action is what the
-            // user asked for in one message).
-            return (.infotainment, CarServerAction.hvacTemperature(
-                driverCelsius: Float(temp), passengerCelsius: Float(temp)).encoded())
+            // research §5: auto_conditioning_start → hvacAutoAction.powerOn, set_temps →
+            // hvacTemperatureAdjustmentAction. 一键开+设温 = powerOn 先行，temperature 跟上，
+            // 只发温度可能不启动空调。
+            return (.infotainment, CarServerAction.hvacOnWithTemperature(
+                celsius: Float(temp)).encoded())
         case .hvacOff:
             return (.infotainment, CarServerAction.hvacAuto(powerOn: false).encoded())
         case let .defrost(on):
@@ -294,11 +294,15 @@ public actor FleetTeslaClient: TeslaClient {
     }
 
     private func get(path: String) async throws -> Data {
-        try await auth.authorized { try await self.send(path: path, body: nil) }.body
+        let r = try await auth.authorized { try await self.send(path: path, body: nil) }
+        _ = try Self.mapStatus(r.status, r.body)
+        return r.body
     }
 
     private func post(path: String) async throws -> Data {
-        try await auth.authorized { try await self.send(path: path, body: Data("{}".utf8)) }.body
+        let r = try await auth.authorized { try await self.send(path: path, body: Data("{}".utf8)) }
+        _ = try Self.mapStatus(r.status, r.body)
+        return r.body
     }
 
     /// One request out through the region-aware transport; no status check here — callers
@@ -429,8 +433,7 @@ enum VehicleSnapshotMapper {
             climate: .init(
                 insideC: p.climateState?.insideTemp, outsideC: p.climateState?.outsideTemp),
             doors: .init(
-                locked: p.vehicleState?.locked ?? true,
-                anyOpen: (p.vehicleState?.ft ?? 0) != 0 || (p.vehicleState?.rt ?? 0) != 0,
+                locked: p.vehicleState?.locked,
                 frontTrunkOpen: (p.vehicleState?.ft ?? 0) != 0,
                 rearTrunkOpen: (p.vehicleState?.rt ?? 0) != 0),
             odometerKm: (p.vehicleState?.odometer ?? 0) * 1.609344,

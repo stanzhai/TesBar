@@ -70,7 +70,7 @@ public final class CommandExecutor: ObservableObject {
         status = .sending
         do {
             try await ensureAwake(vehicleID: vehicleID)
-            try await client.signAndSend(command: command)
+            try await client.signAndSend(command: command, vehicleID: vehicleID)
             status = .succeeded
         } catch {
             let reason = Self.describe(error)

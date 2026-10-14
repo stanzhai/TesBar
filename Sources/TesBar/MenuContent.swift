@@ -217,27 +217,14 @@ struct CommandGroups: View {
                         DangerButton("远程启动", command: .remoteStart, coordinator: services.coordinator)
                     }
                     HStack {
-                        ForEach(VehicleCommand.Door.allCases, id: \.self) { door in
-                            DangerButton(label(door), command: .doorOpen(door), coordinator: services.coordinator)
-                        }
+                        DangerButton("开后备箱", command: .doorOpen(.trunk), coordinator: services.coordinator)
+                        DangerButton("关后备箱", command: .doorClose(.trunk), coordinator: services.coordinator)
+                        DangerButton("开前备箱", command: .doorOpen(.frunk), coordinator: services.coordinator)
+                        DangerButton("关前备箱", command: .doorClose(.frunk), coordinator: services.coordinator)
                     }
-                    HStack {
-                        Button("关后备箱") { send(.doorClose(.trunk)) }
-                        Button("关前备箱") { send(.doorClose(.frunk)) }
-                    }
+                    // 车门本身不支持远程开闭（research §5）；门的开闭状态见上方状态卡。
                 }
             }
-        }
-    }
-
-    private func label(_ door: VehicleCommand.Door) -> String {
-        switch door {
-        case .frontLeft: "前左"
-        case .frontRight: "前右"
-        case .rearLeft: "后左"
-        case .rearRight: "后右"
-        case .frunk: "前备箱"
-        case .trunk: "后备箱"
         }
     }
 

@@ -75,7 +75,7 @@ private actor FakeTeslaClient: TeslaClient {
 
     func wake(id: String) async throws { wakeCalls.append(id) }
 
-    func signAndSend(command: VehicleCommand) async throws {}
+    func signAndSend(command: VehicleCommand, vehicleID: String) async throws {}
 
     func refreshAccessToken() async throws {}
 }
@@ -89,7 +89,7 @@ private func snapshot(state: VehicleSnapshot.State, charging: Bool = false) -> V
             state: charging ? "Charging" : "Stopped", minutesToFull: charging ? 45 : nil
         ),
         climate: .init(insideC: 21.5, outsideC: 8.0),
-        doors: .init(locked: true, anyOpen: false, frontTrunkOpen: false, rearTrunkOpen: false),
+        doors: .init(locked: true, frontTrunkOpen: false, rearTrunkOpen: false),
         odometerKm: 12_834.2, state: state, timestampMs: 1_760_000_000_000
     )
 }
@@ -258,6 +258,6 @@ private struct FailingListClient: TeslaClient {
     func listVehicles() async throws -> [VehicleListEntry] { throw Boom() }
     func vehicleData(id: String) async throws -> VehicleSnapshot { snapshot(state: .online) }
     func wake(id: String) async throws {}
-    func signAndSend(command: VehicleCommand) async throws {}
+    func signAndSend(command: VehicleCommand, vehicleID: String) async throws {}
     func refreshAccessToken() async throws {}
 }

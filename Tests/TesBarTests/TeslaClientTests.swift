@@ -8,7 +8,7 @@ import Testing
 @Test func snapshotDecodesAndCommandsCarryPayloads() throws {
     let json = """
         {"id":"123","name":"My Tesla","charge":{"batteryPercent":77,"rangeKm":238.6,"state":"Charging","minutesToFull":45},
-         "climate":{"insideC":21.5,"outsideC":8.0},"doors":{"locked":true,"anyOpen":false,"frontTrunkOpen":false,"rearTrunkOpen":true},
+         "climate":{"insideC":21.5,"outsideC":8.0},"doors":{"locked":true,"frontTrunkOpen":false,"rearTrunkOpen":true},
          "odometerKm":12834.2,"state":"online","timestampMs":1760000000000}
         """
     let snapshot = try JSONDecoder().decode(VehicleSnapshot.self, from: Data(json.utf8))

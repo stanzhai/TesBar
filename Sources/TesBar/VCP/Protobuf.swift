@@ -169,19 +169,57 @@ enum VCPDomain: UInt32, Sendable {
     case infotainment = 3
 }
 
-/// UniversalMessage.MessageFault_E — the faults TesBar surfaces to users.
-enum MessageFault: UInt32, Sendable, CaseIterable {
-    case errorNone = 0
-    case busy = 1
-    case timeout = 2
-    case unknownKeyID = 3
-    case inactiveKey = 4
-    case invalidSignature = 5
-    case invalidTokenOrCounter = 6
-    case insufficientPrivileges = 7
-    case incorrectEpoch = 15
-    case timeExpired = 17
-    case remoteAccessDisabled = 21
+/// UniversalMessage.MessageFault_E — known raw values plus unknown verbatim
+/// (unknown is always a failure, never success).
+enum MessageFault: Equatable, Sendable {
+    case errorNone
+    case busy
+    case timeout
+    case unknownKeyID
+    case inactiveKey
+    case invalidSignature
+    case invalidTokenOrCounter
+    case insufficientPrivileges
+    case incorrectEpoch
+    case timeExpired
+    case remoteAccessDisabled
+    /// Fault value outside the known set, kept verbatim.
+    case unknown(UInt32)
+
+    init(rawValue: UInt32) {
+        switch rawValue {
+        case 0: self = .errorNone
+        case 1: self = .busy
+        case 2: self = .timeout
+        case 3: self = .unknownKeyID
+        case 4: self = .inactiveKey
+        case 5: self = .invalidSignature
+        case 6: self = .invalidTokenOrCounter
+        case 7: self = .insufficientPrivileges
+        case 15: self = .incorrectEpoch
+        case 17: self = .timeExpired
+        case 21: self = .remoteAccessDisabled
+        default: self = .unknown(rawValue)
+        }
+    }
+
+    /// Wire value: known faults map back; unknown keeps its raw value.
+    var wireValue: UInt32 {
+        switch self {
+        case .errorNone: 0
+        case .busy: 1
+        case .timeout: 2
+        case .unknownKeyID: 3
+        case .inactiveKey: 4
+        case .invalidSignature: 5
+        case .invalidTokenOrCounter: 6
+        case .insufficientPrivileges: 7
+        case .incorrectEpoch: 15
+        case .timeExpired: 17
+        case .remoteAccessDisabled: 21
+        case .unknown(let raw): raw
+        }
+    }
 }
 
 /// Signatures.SessionInfo (handshake reply payload).
@@ -266,7 +304,7 @@ struct RoutableMessage: Equatable, Sendable {
         if let messageFault {
             w.writeField(12) { w in
                 w.writeField(1, 2) // operation_status = OPERATIONSTATUS_ERROR
-                w.writeField(2, messageFault.rawValue)
+                w.writeField(2, messageFault.wireValue)
             }
         }
         if let requestUUID { w.writeField(50, bytes: requestUUID) }
@@ -299,8 +337,10 @@ struct RoutableMessage: Equatable, Sendable {
             case (12, 2):
                 var d = ProtobufReader(try r.readBytes())
                 try d.forEachField { d, f, wt in
-                    if f == 2, wt == 0, let fault = MessageFault(rawValue: try d.readUInt32()) {
-                        msg.messageFault = fault
+                    if f == 2, wt == 0 {
+                        // init keeps unknown raw values verbatim, so callers report
+                        // them as failures instead of reading the reply as success.
+                        msg.messageFault = MessageFault(rawValue: try d.readUInt32())
                     } else { try d.skip(wireType: wt) }
                 }
             case (50, 2): msg.requestUUID = try r.readBytes()
@@ -399,7 +439,7 @@ func encodeVCSECUnsignedMessage(rkeAction: RKEAction? = nil, closureMove: VCSECC
 /// honkHorn=27, sentryMode=30, chargePortDoorOpen=62, chargePortDoorClose=61.
 enum CarServerAction: Equatable, Sendable {
     case hvacAuto(powerOn: Bool)
-    case hvacTemperature(driverCelsius: Float, passengerCelsius: Float)
+    case hvacOnWithTemperature(celsius: Float)
     case hvacPreconditioningMax(on: Bool)
     case hvacBioweapon(on: Bool)
     case hvacSeatHeater(seat: Seat, level: Int)
@@ -421,10 +461,13 @@ enum CarServerAction: Equatable, Sendable {
             switch self {
             case let .hvacAuto(powerOn):
                 w.writeField(10) { $0.writeField(1, bool: powerOn) }
-            case let .hvacTemperature(driver, passenger):
+            case let .hvacOnWithTemperature(celsius):
+                // Two nested actions in ONE VehicleAction message: hvacAutoAction{on=true}
+                // then hvacTemperatureAdjustmentAction — order preserved by field order.
+                w.writeField(10) { $0.writeField(1, bool: true) }
                 w.writeField(14) { w in
-                    w.writeField(6, float: driver) // driver_temp_celsius
-                    w.writeField(7, float: passenger) // passenger_temp_celsius
+                    w.writeField(6, float: celsius)
+                    w.writeField(7, float: celsius)
                 }
             case let .hvacPreconditioningMax(on):
                 w.writeField(12) { $0.writeField(1, bool: on) }

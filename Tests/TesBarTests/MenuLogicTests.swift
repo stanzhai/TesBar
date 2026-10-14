@@ -138,9 +138,10 @@ struct MenuLogicTests {
 
     // MARK: - Doors text (故事 12)
     @Test func doorsText() {
-        #expect(StatusFormatting.doors(VehicleSnapshot.Doors(locked: true, anyOpen: false, frontTrunkOpen: false, rearTrunkOpen: false)) == "已锁车")
-        #expect(StatusFormatting.doors(VehicleSnapshot.Doors(locked: false, anyOpen: true, frontTrunkOpen: false, rearTrunkOpen: false)) == "未锁 · 有车门开")
-        #expect(StatusFormatting.doors(VehicleSnapshot.Doors(locked: true, anyOpen: false, frontTrunkOpen: true, rearTrunkOpen: true)) == "已锁车 · 前备箱开 · 后备箱开")
+        #expect(StatusFormatting.doors(VehicleSnapshot.Doors(locked: true, frontTrunkOpen: false, rearTrunkOpen: false)) == "已锁车")
+        #expect(StatusFormatting.doors(VehicleSnapshot.Doors(locked: false, frontTrunkOpen: false, rearTrunkOpen: false)) == "未锁")
+        #expect(StatusFormatting.doors(VehicleSnapshot.Doors(locked: nil, frontTrunkOpen: false, rearTrunkOpen: false)) == "锁状态未知")
+        #expect(StatusFormatting.doors(VehicleSnapshot.Doors(locked: true, frontTrunkOpen: true, rearTrunkOpen: true)) == "已锁车 · 前备箱开 · 后备箱开")
     }
 
     /// 长按事件序列：begin → 1s tick（触发）→ 松手。

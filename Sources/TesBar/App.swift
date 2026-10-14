@@ -14,20 +14,18 @@ final class AppServices {
 
     init() {
         let defaults = UserDefaults.standard
-        let id = defaults.string(forKey: AppSettings.clientIDKey) ?? ""
-        let secret = defaults.string(forKey: AppSettings.clientSecretKey) ?? ""
+        let id = settings.clientID
+        let secret = settings.clientSecret
 
         let executor: CommandExecutor
         if !id.isEmpty, !secret.isEmpty {
+            let resolver = RegionResolver(defaults: .standard)
             let auth = AuthService(clientID: id, clientSecret: secret)
             let client = FleetTeslaClient(
-                transport: RegionRedirectTransport(
-                    base: URLSessionTransport(),
-                    resolver: RegionResolver(defaults: UserDefaults.standard)
-                ),
+                transport: RegionRedirectTransport(base: URLSessionTransport(), resolver: resolver),
                 auth: auth,
-                resolver: RegionResolver(defaults: UserDefaults.standard),
-                defaults: UserDefaults.standard
+                resolver: resolver,
+                defaults: .standard
             )
             self.client = client
             store = VehicleStore(client: client, defaults: defaults)
@@ -37,13 +35,16 @@ final class AppServices {
             executor = CommandExecutor(client: OfflineTeslaClient(), notifier: UserNotificationsNotifier())
         }
         self.executor = executor
-
-        let settings = self.settings
         coordinator = DangerousCommandCoordinator(
             invoker: ExecutorInvoker(executor: executor, store: store),
             biometrics: LocalAuthGate(),
-            gateEnabled: { settings.biometricGateEnabled }
+            gateEnabled: { [settings] in settings.biometricGateEnabled }
         )
+
+        // 故事 33：启动检查 access token，过期前静默续期。
+        if let client = self.client as? FleetTeslaClient {
+            Task { try? await client.refreshAccessToken() }
+        }
         store.startPolling()
     }
 }
@@ -75,7 +76,7 @@ struct OfflineTeslaClient: TeslaClient {
     func listVehicles() async throws -> [VehicleListEntry] { throw NeedsCredentialsError() }
     func vehicleData(id: String) async throws -> VehicleSnapshot { throw NeedsCredentialsError() }
     func wake(id: String) async throws { throw NeedsCredentialsError() }
-    func signAndSend(command: VehicleCommand) async throws { throw NeedsCredentialsError() }
+    func signAndSend(command: VehicleCommand, vehicleID: String) async throws { throw NeedsCredentialsError() }
     func refreshAccessToken() async throws { throw NeedsCredentialsError() }
 }
 

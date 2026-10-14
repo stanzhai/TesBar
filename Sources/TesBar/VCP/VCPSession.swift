@@ -130,6 +130,6 @@ final class VCPSessionManager: @unchecked Sendable {
         }
         return VCPSession(
             epoch: record.epoch, counter: record.counter, clockTime: record.clockTime,
-            vehiclePublicKey: record.vehiclePublicKey, k: k, challenge: Data())
+            vehiclePublicKey: record.vehiclePublicKey, k: k)
     }
 }

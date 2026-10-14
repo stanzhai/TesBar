@@ -203,6 +203,6 @@ private struct WizardFakeClient: TeslaClient {
 
     func vehicleData(id: String) async throws -> VehicleSnapshot { ScriptedTeslaClient.snapshot(state: .online) }
     func wake(id: String) async throws {}
-    func signAndSend(command: VehicleCommand) async throws {}
+    func signAndSend(command: VehicleCommand, vehicleID: String) async throws {}
     func refreshAccessToken() async throws {}
 }

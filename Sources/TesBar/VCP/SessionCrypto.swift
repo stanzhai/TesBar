@@ -16,8 +16,6 @@ struct VCPSession: Sendable {
     var vehiclePublicKey: Data
     /// K = SHA1(BIG_ENDIAN(Sx,32))[:16].
     var k: Data
-    /// UUID sent with the handshake request (challenge for session-info verification).
-    var challenge: Data
 }
 
 /// P-256 keypair helpers over SecKey.

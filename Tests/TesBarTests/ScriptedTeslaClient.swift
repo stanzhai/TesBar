@@ -37,7 +37,7 @@ actor ScriptedTeslaClient: TeslaClient {
         try next(&wakeScript, fallback: .success(())).get()
     }
 
-    func signAndSend(command: VehicleCommand) async throws {
+    func signAndSend(command: VehicleCommand, vehicleID: String) async throws {
         calls.append("signAndSend")
         sentCommands.append(command)
         try next(&sendScript, fallback: .success(())).get()
@@ -58,7 +58,7 @@ actor ScriptedTeslaClient: TeslaClient {
         VehicleSnapshot(
             charge: .init(batteryPercent: 50, rangeKm: 200, state: "Stopped", minutesToFull: nil),
             climate: .init(insideC: nil, outsideC: nil),
-            doors: .init(locked: true, anyOpen: false, frontTrunkOpen: false, rearTrunkOpen: false),
+            doors: .init(locked: true, frontTrunkOpen: false, rearTrunkOpen: false),
             odometerKm: 1000,
             state: state,
             timestampMs: 0

@@ -162,6 +162,10 @@ private func importPrivateKey(_ scalar: Data, publicPoint: Data) throws -> SecKe
         let decoded = try RoutableMessage.decode(w.data)
         #expect(decoded.messageFault == expected, "fault \(raw)")
     }
+    // Unknown raw value is kept verbatim — never silently dropped to "success".
+    var w = ProtobufWriter()
+    w.writeField(12) { $0.writeField(2, 99) }
+    #expect(try RoutableMessage.decode(w.data).messageFault == .unknown(99))
 }
 
 /// VCSEC command encodings spot-checked against field numbers in vcsec.proto.
@@ -198,8 +202,7 @@ func makeSession(vehicleKey: () throws -> (privateKey: SecKey, publicKeyData: Da
             privateKey: client.privateKey, peerPublicKey: vehicle.publicKeyData))
     let session = VCPSession(
         epoch: Data(repeating: 0x4C, count: 16), counter: 6, clockTime: 2650,
-        vehiclePublicKey: vehicle.publicKeyData, k: k,
-        challenge: Data(repeating: 1, count: 16))
+        vehiclePublicKey: vehicle.publicKeyData, k: k)
     return (session, client)
 }
 
