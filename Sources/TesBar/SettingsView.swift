@@ -54,6 +54,7 @@ struct SettingsView: View {
 struct SetupEntry: View {
     let services: AppServices
     @ObservedObject private var settings: AppSettings
+    @State private var showWizard = false
     @State private var publicKey = ""
     @State private var copied = false
 
@@ -69,7 +70,7 @@ struct SetupEntry: View {
             if services.client == nil {
                 Text("在设置中填写 Client ID / Secret 后重启应用，再登录与选择车辆。")
                     .font(.caption).foregroundStyle(.secondary)
-                Button("打开设置…") { NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil) }
+                Button("打开设置向导…") { showWizard = true }
             } else {
                 Button("拉取车辆列表") { Task { await services.store.refreshNow() } }
                 if services.store.isLoading { ProgressView().controlSize(.small) }
@@ -97,5 +98,8 @@ struct SetupEntry: View {
             }
         }
         .padding(.vertical, 4)
+        .sheet(isPresented: $showWizard) {
+            SetupWizardView(wizard: SetupWizard())
+        }
     }
 }
