@@ -125,9 +125,8 @@ public enum VehicleCommand: Sendable, Equatable {
     case doorOpen(Door)
     case doorClose(Door)
     case remoteStart
-
     /// Doors / trunks that count as Dangerous Commands (long-press gate, ADR-0003).
-    public enum Door: String, Sendable, Equatable {
+    public enum Door: String, CaseIterable, Sendable, Equatable {
         case frontLeft, frontRight, rearLeft, rearRight, frunk, trunk
     }
 

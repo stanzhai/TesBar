@@ -102,6 +102,9 @@ public final class CommandExecutor: ObservableObject {
         if error is VirtualKeyNotPairedError {
             return "虚拟钥匙未配对：车辆拒绝签名指令。请先在设置中完成 Virtual Key 配对，再重发。"
         }
+        if error as? AuthError == .reauthRequired {
+            return "登录已过期：请重新登录（设置 → 重新登录）。"
+        }
         if let timeout = error as? WakeTimeoutError {
             return "车辆唤醒超时：等待上线超过 \(timeout.attempts) 次轮询仍未 online，请稍后重试。"
         }
