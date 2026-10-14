@@ -1,4 +1,4 @@
-Status: ready-for-agent
+Status: ready-for-human
 Type: task
 
 # 04 — OAuth token 流程与自动续期
@@ -27,3 +27,11 @@ Tesla OAuth 2 授权码流 + refresh。研究修正（见 `/Users/stan/Projects/
 - ASWebAuthenticationSession UI 不测。
 
 ## Blocked by: 02
+
+## Comments
+
+- Commit `e4919fd` (branch `ticket/04`, merged integration → `ef79def`).
+- Files: `Sources/TesBar/AuthService.swift`, `Tests/TesBarTests/AuthServiceTests.swift`.
+- Evidence: pre-merge `Test run with 19 tests in 2 suites passed`; post-merge `Test run with 53 tests in 4 suites passed`.
+- Tests: exchange request-body fields (grant_type/code/client_id/client_secret/audience/redirect_uri + URL/method/Content-Type); refresh persists both tokens atomically (refresh first — single-use semantics); refresh body has no client_secret; missing-new-refresh keeps old value; 400/401/`login_required` → `RefreshTokenInvalid`; 401 → refresh → retry succeeds; refresh 400 → `ReauthRequired` with no body retry; non-401 passes through; JWT exp parse (valid/missing-exp/non-base64); startup check refreshes only when expired (<60s margin).
+- Deviations: `authorized` retries exactly once on 401 only (per ticket); ASWebAuthenticationSession call site compiled (`MainActor` helper + `ASWebAuthenticationPresentationContextProviding` anchor) but not unit-tested, per ticket.
