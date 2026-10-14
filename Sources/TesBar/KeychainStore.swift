@@ -8,10 +8,13 @@ public enum KeychainError: Error, Equatable {
 }
 
 public struct KeychainStore: Sendable {
-    private let service: String = "com.tesbar.app"
-    private let privateKeyAccount = "vcp-private-key"
+    private let service: String
+    private let privateKeyAccount: String
 
-    public init() {}
+    public init(service: String = "com.tesbar.app", privateKeyAccount: String = "vcp-private-key") {
+        self.service = service
+        self.privateKeyAccount = privateKeyAccount
+    }
 
     // MARK: Token
 
