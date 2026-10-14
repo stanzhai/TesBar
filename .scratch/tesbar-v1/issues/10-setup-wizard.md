@@ -1,4 +1,4 @@
-Status: ready-for-human
+Status: resolved
 Type: task
 
 # 10 — 首启向导：OAuth 登录 + Virtual Key 配对引导
