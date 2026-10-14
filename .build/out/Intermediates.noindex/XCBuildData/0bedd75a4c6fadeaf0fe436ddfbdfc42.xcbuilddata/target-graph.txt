@@ -1,0 +1,10 @@
+Target dependency graph (4 targets)
+Target 'AllIncludingTests' in project 'Aggregate'
+➜ Explicit dependency on target 'TesBarTests-product' in project 'TesBar'
+➜ Dependency on target 'TesBarTests-product' in project 'TesBar' via transitive dependency through 'TesBarTests-test-runner'
+➜ Explicit dependency on target 'TesBar-product' in project 'TesBar'
+Target 'TesBarTests-product' in project 'TesBar'
+➜ Explicit dependency on target 'TesBar-product' in project 'TesBar'
+➜ Explicit dependency on target 'TesBar' in project 'TesBar'
+Target 'TesBar' in project 'TesBar' (no dependencies)
+Target 'TesBar-product' in project 'TesBar' (no dependencies)

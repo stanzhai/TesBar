@@ -1,0 +1,29 @@
+{
+  "" : {
+    "diagnostics" : "/Users/stan/Projects/TesBar/.worktrees/01/.build/out/Intermediates.noindex/TesBar.build/Debug/TesBar-p.build/Objects-normal/arm64/TesBar-primary.dia",
+    "emit-module-dependencies" : "/Users/stan/Projects/TesBar/.worktrees/01/.build/out/Intermediates.noindex/TesBar.build/Debug/TesBar-p.build/Objects-normal/arm64/TesBar-primary-emit-module.d",
+    "emit-module-diagnostics" : "/Users/stan/Projects/TesBar/.worktrees/01/.build/out/Intermediates.noindex/TesBar.build/Debug/TesBar-p.build/Objects-normal/arm64/TesBar-primary-emit-module.dia",
+    "pch" : "/Users/stan/Projects/TesBar/.worktrees/01/.build/out/Intermediates.noindex/TesBar.build/Debug/TesBar-p.build/Objects-normal/arm64/TesBar-primary-Bridging-header.pch",
+    "swift-dependencies" : "/Users/stan/Projects/TesBar/.worktrees/01/.build/out/Intermediates.noindex/TesBar.build/Debug/TesBar-p.build/Objects-normal/arm64/TesBar-primary.swiftdeps"
+  },
+  "/Users/stan/Projects/TesBar/.worktrees/01/Sources/TesBar/TeslaClient.swift" : {
+    "const-values" : "/Users/stan/Projects/TesBar/.worktrees/01/.build/out/Intermediates.noindex/TesBar.build/Debug/TesBar-p.build/Objects-normal/arm64/TeslaClient.swiftconstvalues",
+    "dependencies" : "/Users/stan/Projects/TesBar/.worktrees/01/.build/out/Intermediates.noindex/TesBar.build/Debug/TesBar-p.build/Objects-normal/arm64/TeslaClient.d",
+    "diagnostics" : "/Users/stan/Projects/TesBar/.worktrees/01/.build/out/Intermediates.noindex/TesBar.build/Debug/TesBar-p.build/Objects-normal/arm64/TeslaClient.dia",
+    "index-unit-output-path" : "/TesBar.build/Debug/TesBar-p.build/Objects-normal/arm64/TeslaClient.o",
+    "llvm-bc" : "/Users/stan/Projects/TesBar/.worktrees/01/.build/out/Intermediates.noindex/TesBar.build/Debug/TesBar-p.build/Objects-normal/arm64/TeslaClient.bc",
+    "object" : "/Users/stan/Projects/TesBar/.worktrees/01/.build/out/Intermediates.noindex/TesBar.build/Debug/TesBar-p.build/Objects-normal/arm64/TeslaClient.o",
+    "swift-dependencies" : "/Users/stan/Projects/TesBar/.worktrees/01/.build/out/Intermediates.noindex/TesBar.build/Debug/TesBar-p.build/Objects-normal/arm64/TeslaClient.swiftdeps",
+    "swiftmodule" : "/Users/stan/Projects/TesBar/.worktrees/01/.build/out/Intermediates.noindex/TesBar.build/Debug/TesBar-p.build/Objects-normal/arm64/TeslaClient~partial.swiftmodule"
+  },
+  "/Users/stan/Projects/TesBar/.worktrees/01/Sources/TesBar/main.swift" : {
+    "const-values" : "/Users/stan/Projects/TesBar/.worktrees/01/.build/out/Intermediates.noindex/TesBar.build/Debug/TesBar-p.build/Objects-normal/arm64/main.swiftconstvalues",
+    "dependencies" : "/Users/stan/Projects/TesBar/.worktrees/01/.build/out/Intermediates.noindex/TesBar.build/Debug/TesBar-p.build/Objects-normal/arm64/main.d",
+    "diagnostics" : "/Users/stan/Projects/TesBar/.worktrees/01/.build/out/Intermediates.noindex/TesBar.build/Debug/TesBar-p.build/Objects-normal/arm64/main.dia",
+    "index-unit-output-path" : "/TesBar.build/Debug/TesBar-p.build/Objects-normal/arm64/main.o",
+    "llvm-bc" : "/Users/stan/Projects/TesBar/.worktrees/01/.build/out/Intermediates.noindex/TesBar.build/Debug/TesBar-p.build/Objects-normal/arm64/main.bc",
+    "object" : "/Users/stan/Projects/TesBar/.worktrees/01/.build/out/Intermediates.noindex/TesBar.build/Debug/TesBar-p.build/Objects-normal/arm64/main.o",
+    "swift-dependencies" : "/Users/stan/Projects/TesBar/.worktrees/01/.build/out/Intermediates.noindex/TesBar.build/Debug/TesBar-p.build/Objects-normal/arm64/main.swiftdeps",
+    "swiftmodule" : "/Users/stan/Projects/TesBar/.worktrees/01/.build/out/Intermediates.noindex/TesBar.build/Debug/TesBar-p.build/Objects-normal/arm64/main~partial.swiftmodule"
+  }
+}
