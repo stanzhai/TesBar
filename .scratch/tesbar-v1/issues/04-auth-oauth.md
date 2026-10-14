@@ -1,4 +1,4 @@
-Status: ready-for-human
+Status: resolved
 Type: task
 
 # 04 — OAuth token 流程与自动续期
