@@ -1,4 +1,4 @@
-Status: ready-for-agent
+Status: ready-for-human
 Type: task
 
 # 07 — CommandExecutor：Wake→签名→发令→状态行/通知
@@ -28,3 +28,16 @@ Type: task
   - wake 等待超时 → 失败原因含超时。
 
 ## Blocked by: 01
+
+## Comments
+
+- 4ae3c5a `07-command-executor: wake→sign→send orchestration, status line, failure notifications, virtual-key-paired guidance`
+  - `Sources/TesBar/CommandExecutor.swift`：`CommandExecutor`（@MainActor ObservableObject，`@Published status`）；`Notifier` 微协议；`CommandStatus`（idle/sending/succeeded/failed(reason, retryable)）。
+  - `Sources/TesBar/UserNotificationsNotifier.swift`：生产 `UserNotificationsNotifier`（actor，首发展示授权请求，失败仍投递）。
+  - `Sources/TesBar/TeslaClient.swift`：新增 `VirtualKeyNotPairedError`（typed error，05 抛 UNKNOWN_KEY_ID 时映射为它）。
+  - `Tests/TesBarTests/CommandExecutorTests.swift` + `Tests/TesBarTests/ScriptedTeslaClient.swift`：全部 6 条验收（sleep→wake→send 顺序、醒车直发不 wake、未配对→配对指引+通知、成功静默、retry 重发、wake 轮询 3×2s 超时）+ 拉不到数据回退 wake。注入 sleep 闭包，测试 0.08s 跑完。
+- 3c06994 merge `integration/tesbar-v1`（带入 06 VehicleStore）：对端测试文件同有 `FakeTeslaClient`，本工单的重命名为 `ScriptedTeslaClient` 并将对端标记 `private`，消除重定义。
+- 测试证据：`swift test --jobs 1` → `Test run with 19 tests in 2 suites passed`（含本工单 6 项全绿）。
+- 偏差：无。测试基建命中 CLT TestingMacros 插件竞态，按仓库说明重试后即绿，非代码问题。
+
+Status: ready-for-human
