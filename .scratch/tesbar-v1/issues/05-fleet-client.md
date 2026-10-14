@@ -1,4 +1,4 @@
-Status: ready-for-agent
+Status: resolved
 Type: task
 
 # 05 — FleetTeslaClient：HTTP 实现（VIN 路由 + signed_command + VCP 会话）

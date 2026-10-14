@@ -1,4 +1,4 @@
-Status: ready-for-agent
+Status: resolved
 Type: task
 
 # 01 — 项目骨架：SwiftPM executable + TeslaClient 协议接缝

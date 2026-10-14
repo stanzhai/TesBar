@@ -1,4 +1,4 @@
-Status: ready-for-human
+Status: resolved
 Type: task
 
 # 02 — KeychainStore：token/私钥存 Keychain
