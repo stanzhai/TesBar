@@ -1,4 +1,4 @@
-Status: ready-for-human
+Status: resolved
 Type: task
 
 # 08 — Fleet API 域解析：421/Alt-Svc 重定向 + 手动覆盖
