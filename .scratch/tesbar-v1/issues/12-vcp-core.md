@@ -43,5 +43,5 @@ Type: task
   - proto3 defaults omitted on encode: `RKEAction.UNLOCK` (0) encodes to empty payload; `signatureType=0` omitted from TLV (matches official `SERIALIZE` example output `0203616263050400000064ff`).
 
 
-Status: ready-for-human
+Status: resolved
 ## Blocked by: (none)

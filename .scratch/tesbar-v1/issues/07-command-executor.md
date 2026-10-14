@@ -1,4 +1,4 @@
-Status: ready-for-human
+Status: resolved
 Type: task
 
 # 07 — CommandExecutor：Wake→签名→发令→状态行/通知
@@ -40,4 +40,4 @@ Type: task
 - 测试证据：`swift test --jobs 1` → `Test run with 19 tests in 2 suites passed`（含本工单 6 项全绿）。
 - 偏差：无。测试基建命中 CLT TestingMacros 插件竞态，按仓库说明重试后即绿，非代码问题。
 
-Status: ready-for-human
+Status: resolved

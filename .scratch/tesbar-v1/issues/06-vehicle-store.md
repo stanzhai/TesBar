@@ -1,4 +1,4 @@
-Status: ready-for-human
+Status: resolved
 Type: task
 
 # 06 — VehicleStore：轮询节奏状态机（@Observable）

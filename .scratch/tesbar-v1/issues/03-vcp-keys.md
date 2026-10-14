@@ -1,4 +1,4 @@
-Status: ready-for-human
+Status: resolved
 Type: task
 
 # 03 — VCP 私钥对生成 + Keychain 集成
