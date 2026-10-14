@@ -4,14 +4,14 @@ import Testing
 @testable import TesBar
 
 /// Ticket 07 acceptance: wake-before-send, awake direct send, pairing guidance,
-/// success silent, retry, wake timeout — via scripted FakeTeslaClient + spy notifier + fake sleeper.
+/// success silent, retry, wake timeout — via scripted ScriptedTeslaClient + spy notifier + fake sleeper.
 @MainActor
 struct CommandExecutorTests {
-    private let online = FakeTeslaClient.snapshot(state: .online)
-    private let asleep = FakeTeslaClient.snapshot(state: .asleep)
+    private let online = ScriptedTeslaClient.snapshot(state: .online)
+    private let asleep = ScriptedTeslaClient.snapshot(state: .asleep)
 
     @Test func asleepVehicleWakesThenSends() async {
-        let client = FakeTeslaClient(data: [.success(asleep), .success(online)])
+        let client = ScriptedTeslaClient(data: [.success(asleep), .success(online)])
         let notifier = SpyNotifier()
         let executor = CommandExecutor(client: client, notifier: notifier, sleep: { _ in })
 
@@ -24,7 +24,7 @@ struct CommandExecutorTests {
     }
 
     @Test func awakeVehicleSendsDirectlyWithoutWake() async {
-        let client = FakeTeslaClient(data: [.success(online)])
+        let client = ScriptedTeslaClient(data: [.success(online)])
         let notifier = SpyNotifier()
         let executor = CommandExecutor(client: client, notifier: notifier, sleep: { _ in })
 
@@ -38,7 +38,7 @@ struct CommandExecutorTests {
     }
 
     @Test func unpairedVirtualKeyShowsGuidanceAndNotifies() async {
-        let client = FakeTeslaClient(data: [.success(online)], send: [.failure(VirtualKeyNotPairedError())])
+        let client = ScriptedTeslaClient(data: [.success(online)], send: [.failure(VirtualKeyNotPairedError())])
         let notifier = SpyNotifier()
         let executor = CommandExecutor(client: client, notifier: notifier)
 
@@ -58,7 +58,7 @@ struct CommandExecutorTests {
     }
 
     @Test func retryResendsLastCommand() async {
-        let client = FakeTeslaClient(data: [.success(online)])
+        let client = ScriptedTeslaClient(data: [.success(online)])
         let notifier = SpyNotifier()
         let executor = CommandExecutor(client: client, notifier: notifier)
 
@@ -71,7 +71,7 @@ struct CommandExecutorTests {
     }
 
     @Test func wakePollingIsBoundedAndTimesOut() async {
-        let client = FakeTeslaClient(data: [.success(asleep)]) // never comes online
+        let client = ScriptedTeslaClient(data: [.success(asleep)]) // never comes online
         let notifier = SpyNotifier()
         let sleeper = SleepSpy()
         let executor = CommandExecutor(
@@ -98,7 +98,7 @@ struct CommandExecutorTests {
     }
 
     @Test func unreachableDataFallsBackToWake() async {
-        let client = FakeTeslaClient(data: [.failure(URLError(.notConnectedToInternet)), .success(online)])
+        let client = ScriptedTeslaClient(data: [.failure(URLError(.notConnectedToInternet)), .success(online)])
         let notifier = SpyNotifier()
         let executor = CommandExecutor(client: client, notifier: notifier, sleep: { _ in })
 

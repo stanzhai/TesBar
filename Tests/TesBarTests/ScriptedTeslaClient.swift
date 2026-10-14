@@ -4,7 +4,7 @@ import Foundation
 
 /// 脚本化假 TeslaClient：每个方法按预设队列返回结果，队列耗尽后重复最后一个（空队列用内置默认）。
 /// 记录调用名顺序与发出的指令，供测试断言"先 Wake 后发令"等编排行为。
-actor FakeTeslaClient: TeslaClient {
+actor ScriptedTeslaClient: TeslaClient {
     private(set) var calls: [String] = []
     private(set) var sentCommands: [VehicleCommand] = []
 

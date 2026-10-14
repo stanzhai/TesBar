@@ -49,7 +49,7 @@ actor ManualClock: PollClock {
 }
 
 /// Scripted TeslaClient: every call is recorded; snapshots come off a queue.
-actor FakeTeslaClient: TeslaClient {
+private actor FakeTeslaClient: TeslaClient {
     private(set) var listCalls = 0
     private(set) var dataCalls: [String] = []
     private(set) var wakeCalls: [String] = []
