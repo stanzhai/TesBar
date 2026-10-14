@@ -1,2 +1,2 @@
 // Replaced by the MenuBarExtra app in later tickets.
-print("TesBar skeleton")
+// ponytail: no entry point yet; ticket 09 adds the MenuBarExtra @main.
