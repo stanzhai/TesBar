@@ -1,4 +1,4 @@
-Status: ready-for-agent
+Status: ready-for-human
 Type: task
 
 # 03 — VCP 私钥对生成 + Keychain 集成
@@ -20,5 +20,13 @@ prime256v1 密钥对生成（SecKeyCreateRandomKey），私钥 PEM 存 Keychain�
   - 首次调用生成、二次调用返回相同公钥 PEM。
   - PEM 可被 `SecKeyCreateWithData` 重建，curve 为 P-256。
 - 串行 `swift test --jobs 1` 全绿。
+
+## Comments
+
+- Commit df35ebd（branch `ticket/03`，已 merge integration/tesbar-v1）。
+- Files: `Sources/TesBar/VCPKeyManager.swift`（新增），`Sources/TesBar/KeychainStore.swift`（init 注入 service/privateKeyAccount，默认值不变，仅为测试隔离），`Tests/TesBarTests/VCPKeyManagerTests.swift`（新增 8 tests）。
+- Evidence（merge 后全仓）: `Test run with 27 tests in 3 suites passed after 0.193 seconds`（swift build/test --jobs 1；期间遇 TestingMacros 加载竞态，按惯例 rm -rf .build 重试通过）。
+- 关键平台事实（macOS 27 CLT 实测）：`SecKeyCopyExternalRepresentation` 私钥=raw ANSI X9.63（**point65||scalar32**，点在前），公钥=raw 65B 点（**非** SPKI DER）；`SecKeyCreateWithData` 只接受 raw 输入，对合法 SEC1/PKCS#8/SPKI DER（含 openssl 生成）一律 -50 paramErr。故实现自行做 DER 包装/解包：私钥存 SEC1（RFC 5915）PEM，公钥输出 SPKI PEM，重建时解包回 raw 交给 SecKeyCreateWithData。openssl 交叉验证：`openssl ec -pubout` 由私钥 PEM 派生的公钥 PEM 与本实现输出字节一致。
+- Deviations: ticket 原文推测"公钥 ExternalRepresentation 已是 SPKI DER"——本机不成立（实测 65B raw 点），已按实际行为自行包装；私钥格式选 SEC1（ticket 允许 SEC1 或 PKCS#8，文件头 `EC PRIVATE KEY` 标注）。
 
 ## Blocked by: 02
