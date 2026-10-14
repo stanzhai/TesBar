@@ -1,0 +1,29 @@
+{
+  "" : {
+    "diagnostics" : "/Users/stan/Projects/TesBar/.worktrees/02/.build/out/Intermediates.noindex/TesBar.build/Debug/TesBarTests-p.build/Objects-normal/arm64/TesBarTests-primary.dia",
+    "emit-module-dependencies" : "/Users/stan/Projects/TesBar/.worktrees/02/.build/out/Intermediates.noindex/TesBar.build/Debug/TesBarTests-p.build/Objects-normal/arm64/TesBarTests-primary-emit-module.d",
+    "emit-module-diagnostics" : "/Users/stan/Projects/TesBar/.worktrees/02/.build/out/Intermediates.noindex/TesBar.build/Debug/TesBarTests-p.build/Objects-normal/arm64/TesBarTests-primary-emit-module.dia",
+    "pch" : "/Users/stan/Projects/TesBar/.worktrees/02/.build/out/Intermediates.noindex/TesBar.build/Debug/TesBarTests-p.build/Objects-normal/arm64/TesBarTests-primary-Bridging-header.pch",
+    "swift-dependencies" : "/Users/stan/Projects/TesBar/.worktrees/02/.build/out/Intermediates.noindex/TesBar.build/Debug/TesBarTests-p.build/Objects-normal/arm64/TesBarTests-primary.swiftdeps"
+  },
+  "/Users/stan/Projects/TesBar/.worktrees/02/.build/out/Intermediates.noindex/TesBar.build/Debug/TesBarTests-p.build/DerivedSources/test_entry_point.swift" : {
+    "const-values" : "/Users/stan/Projects/TesBar/.worktrees/02/.build/out/Intermediates.noindex/TesBar.build/Debug/TesBarTests-p.build/Objects-normal/arm64/test_entry_point.swiftconstvalues",
+    "dependencies" : "/Users/stan/Projects/TesBar/.worktrees/02/.build/out/Intermediates.noindex/TesBar.build/Debug/TesBarTests-p.build/Objects-normal/arm64/test_entry_point.d",
+    "diagnostics" : "/Users/stan/Projects/TesBar/.worktrees/02/.build/out/Intermediates.noindex/TesBar.build/Debug/TesBarTests-p.build/Objects-normal/arm64/test_entry_point.dia",
+    "index-unit-output-path" : "/TesBar.build/Debug/TesBarTests-p.build/Objects-normal/arm64/test_entry_point.o",
+    "llvm-bc" : "/Users/stan/Projects/TesBar/.worktrees/02/.build/out/Intermediates.noindex/TesBar.build/Debug/TesBarTests-p.build/Objects-normal/arm64/test_entry_point.bc",
+    "object" : "/Users/stan/Projects/TesBar/.worktrees/02/.build/out/Intermediates.noindex/TesBar.build/Debug/TesBarTests-p.build/Objects-normal/arm64/test_entry_point.o",
+    "swift-dependencies" : "/Users/stan/Projects/TesBar/.worktrees/02/.build/out/Intermediates.noindex/TesBar.build/Debug/TesBarTests-p.build/Objects-normal/arm64/test_entry_point.swiftdeps",
+    "swiftmodule" : "/Users/stan/Projects/TesBar/.worktrees/02/.build/out/Intermediates.noindex/TesBar.build/Debug/TesBarTests-p.build/Objects-normal/arm64/test_entry_point~partial.swiftmodule"
+  },
+  "/Users/stan/Projects/TesBar/.worktrees/02/Tests/TesBarTests/KeychainStoreTests.swift" : {
+    "const-values" : "/Users/stan/Projects/TesBar/.worktrees/02/.build/out/Intermediates.noindex/TesBar.build/Debug/TesBarTests-p.build/Objects-normal/arm64/KeychainStoreTests.swiftconstvalues",
+    "dependencies" : "/Users/stan/Projects/TesBar/.worktrees/02/.build/out/Intermediates.noindex/TesBar.build/Debug/TesBarTests-p.build/Objects-normal/arm64/KeychainStoreTests.d",
+    "diagnostics" : "/Users/stan/Projects/TesBar/.worktrees/02/.build/out/Intermediates.noindex/TesBar.build/Debug/TesBarTests-p.build/Objects-normal/arm64/KeychainStoreTests.dia",
+    "index-unit-output-path" : "/TesBar.build/Debug/TesBarTests-p.build/Objects-normal/arm64/KeychainStoreTests.o",
+    "llvm-bc" : "/Users/stan/Projects/TesBar/.worktrees/02/.build/out/Intermediates.noindex/TesBar.build/Debug/TesBarTests-p.build/Objects-normal/arm64/KeychainStoreTests.bc",
+    "object" : "/Users/stan/Projects/TesBar/.worktrees/02/.build/out/Intermediates.noindex/TesBar.build/Debug/TesBarTests-p.build/Objects-normal/arm64/KeychainStoreTests.o",
+    "swift-dependencies" : "/Users/stan/Projects/TesBar/.worktrees/02/.build/out/Intermediates.noindex/TesBar.build/Debug/TesBarTests-p.build/Objects-normal/arm64/KeychainStoreTests.swiftdeps",
+    "swiftmodule" : "/Users/stan/Projects/TesBar/.worktrees/02/.build/out/Intermediates.noindex/TesBar.build/Debug/TesBarTests-p.build/Objects-normal/arm64/KeychainStoreTests~partial.swiftmodule"
+  }
+}
