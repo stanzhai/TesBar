@@ -190,17 +190,20 @@ struct SessionInfo: Equatable, Sendable {
     var publicKey: Data
     var epoch: Data
     var clockTime: UInt32
+    /// status(5) u32: 0 = OK, 1 = KEY_NOT_ON_WHITELIST (virtual key not paired).
+    var status: UInt32
 
-    /// counter(1) u32, publicKey(2) bytes, epoch(3) bytes, clock_time(4) u32.
+    /// counter(1) u32, publicKey(2) bytes, epoch(3) bytes, clock_time(4) fixed32, status(5) u32.
     static func decode(_ data: Data) throws -> SessionInfo {
         var r = ProtobufReader(data)
-        var info = SessionInfo(counter: 0, publicKey: Data(), epoch: Data(), clockTime: 0)
+        var info = SessionInfo(counter: 0, publicKey: Data(), epoch: Data(), clockTime: 0, status: 0)
         try r.forEachField { r, field, wireType in
             switch (field, wireType) {
             case (1, 0): info.counter = try r.readUInt32()
             case (2, 2): info.publicKey = try r.readBytes()
             case (3, 2): info.epoch = try r.readBytes()
             case (4, 5): info.clockTime = try r.readFixed32()
+            case (5, 0): info.status = try r.readUInt32()
             default: try r.skip(wireType: wireType)
             }
         }

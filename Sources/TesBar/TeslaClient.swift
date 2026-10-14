@@ -13,10 +13,24 @@ public protocol TeslaClient: Sendable {
 public struct VehicleListEntry: Sendable, Equatable, Codable {
     public let id: String
     public let name: String
+    /// 17-char VIN — signed_command is VIN-keyed (ticket 05).
+    public let vin: String
 
-    public init(id: String, name: String) {
+    /// Old persisted/test JSON without `vin` decodes with an empty string (union-merge safety);
+    /// real Fleet API `GET /api/1/vehicles` responses always carry one.
+    public init(id: String, name: String, vin: String = "") {
         self.id = id
         self.name = name
+        self.vin = vin
+    }
+
+    private enum CodingKeys: String, CodingKey { case id, name, vin }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(String.self, forKey: .id)
+        name = try c.decode(String.self, forKey: .name)
+        vin = try c.decodeIfPresent(String.self, forKey: .vin) ?? ""
     }
 }
 
