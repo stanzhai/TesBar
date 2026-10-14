@@ -1,4 +1,4 @@
-Status: ready-for-agent
+Status: resolved
 Type: task
 
 # 06 — VehicleStore：轮询节奏状态机（@Observable）
@@ -25,3 +25,11 @@ Type: task
   - 离线 → offline 状态非 error。
 
 ## Blocked by: 01
+
+## Comments
+
+- Commit: `b90be29` (branch `ticket/06`); integration merge was a no-op (already ancestor).
+- Files: `Sources/TesBar/VehicleStore.swift` (PollClock protocol + SystemPollClock + @Observable VehicleStore), `Tests/TesBarTests/VehicleStoreTests.swift` (ManualClock, FakeTeslaClient, 7 tests).
+- Tests: `Test run with 13 tests in 1 suite passed` (7 new VehicleStore tests + 6 pre-existing). Verified via full `swift test --jobs 1` output; TestingMacros flake hit twice, cleared by `rm -rf .build` retry per contract.
+- Acceptance coverage: menu-open immediate fetch; charging → 60 s cadence (two advances); idle online → 300 s no poll, 900 s poll; asleep → no `vehicleData`, no `wake`; vehicle switch → fetch + persisted `selectedVehicleID` (relaunch restores); offline → `snapshot.state == .offline`, `error == nil`.
+- Deviations: package targets macOS 13 but `@Observable` requires 14, so `VehicleStore` (and test helpers) are `@available(macOS 14, *)` rather than bumping the shared `Package.swift` platform floor. Store is `@unchecked Sendable` — all mutable state is `@MainActor`-isolated; only the poll `Task` reference is nonisolated.
