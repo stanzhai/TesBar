@@ -1,4 +1,0 @@
-module TesBar {
-header "TesBar-Swift.h"
-export *
-}
