@@ -126,7 +126,7 @@ struct FleetTeslaClientTests {
                 url: request.url?.absoluteString ?? "", method: request.httpMethod ?? "",
                 body: request.httpBody))
 
-            if request.url?.host == "fleet-auth.prd.cn.vn.cloud.tesla.cn" {
+            if request.url?.host == "auth.tesla.cn" {
                 guard let next = authScript.first else { return (500, [:], Data()) }
                 authScript.removeFirst()
                 return (next.status, ["content-type": "application/json"], Data(next.json.utf8))

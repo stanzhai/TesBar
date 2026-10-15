@@ -62,9 +62,10 @@ private func makeWizard(
     #expect(flow.step == .credentials)
 }
 
-@available(macOS 14, *) @Test func resumingLoggedInSkipsToKeyPair() {
-    #expect(SetupStepFlow.resuming(isLoggedIn: true).step == .keyPair)
-    #expect(SetupStepFlow.resuming(isLoggedIn: false).step == .credentials)
+@available(macOS 14, *) @Test func resumingPicksStartStepFromState() {
+    #expect(SetupStepFlow.resuming(hasCredentials: true, isLoggedIn: true).step == .keyPair)
+    #expect(SetupStepFlow.resuming(hasCredentials: true, isLoggedIn: false).step == .login)
+    #expect(SetupStepFlow.resuming(hasCredentials: false, isLoggedIn: false).step == .credentials)
 }
 
 @available(macOS 14, *) @MainActor @Test func freshWizardWithLoginResumesAtKeyPair() {
@@ -105,7 +106,7 @@ private func makeWizard(
     let wizard = makeWizard(defaults: defaults, keychain: keychain)
     #expect(wizard.clientID == "cid-2")
     #expect(wizard.clientSecret == "saved-secret")
-    #expect(wizard.domain == "example.com")
+    #expect(wizard.flow.step == .login)  // 凭据已存未登录 → 续认证从登录步开始
 }
 
 // MARK: - 配对 URL

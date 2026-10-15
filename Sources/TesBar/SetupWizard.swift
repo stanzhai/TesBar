@@ -17,10 +17,11 @@ public struct SetupStepFlow: Equatable, Sendable {
 
     public init(step: SetupStep = .credentials) { self.step = step }
 
-    /// 已登录（Keychain 有 refresh token）则从密钥步开始，跳过凭据/登录；
-    /// 也覆盖“未配对虚拟钥匙重看公钥”入口（09 从设置重开向导）。
-    public static func resuming(isLoggedIn: Bool) -> SetupStepFlow {
-        SetupStepFlow(step: isLoggedIn ? .keyPair : .credentials)
+    /// 登录态决定起点：已登录（Keychain 有 refresh token）从密钥步开始；
+    /// 凭据已存但未登录从登录步开始（续认证场景）；
+    /// 全新从凭据步开始。也覆盖“未配对虚拟钥匙重看公钥”入口（09 从设置重开向导）。
+    public static func resuming(hasCredentials: Bool, isLoggedIn: Bool) -> SetupStepFlow {
+        SetupStepFlow(step: isLoggedIn ? .keyPair : hasCredentials ? .login : .credentials)
     }
 
     public mutating func next() { if let n = step.nextStep { step = n } }
@@ -191,8 +192,8 @@ public final class SetupWizard {
         clientID = defaults.string(forKey: Self.clientIDKey) ?? ""
         clientSecret = (try? keychain.readToken(Self.clientSecretAccount)) ?? ""
         domain = defaults.string(forKey: Self.domainKey) ?? ""
-        isLoggedIn = ((try? keychain.readToken(AuthService.refreshAccount)) ?? nil) != nil
-        flow = SetupStepFlow.resuming(isLoggedIn: isLoggedIn)
+        isLoggedIn = keychain.hasToken(AuthService.refreshAccount)
+        flow = SetupStepFlow.resuming(hasCredentials: !clientID.isEmpty && !clientSecret.isEmpty, isLoggedIn: isLoggedIn)
     }
 }
 

@@ -7,6 +7,7 @@ struct SettingsView: View {
     let services: AppServices
     @ObservedObject private var settings: AppSettings
     @State private var autostart = false
+    @Environment(\.dismiss) private var dismiss
 
     init(services: AppServices) {
         self.services = services
@@ -45,6 +46,11 @@ struct SettingsView: View {
         .frame(width: 380, height: 360)
         .onAppear { autostart = AppSettings.currentAutostart() }
         .onChange(of: autostart) { enabled in AppSettings.setAutostart(enabled) }
+        .toolbar {
+            ToolbarItem(placement: .confirmationAction) {
+                Button("完成") { dismiss() }
+            }
+        }
     }
 }
 
@@ -57,6 +63,7 @@ struct SetupEntry: View {
     @State private var showWizard = false
     @State private var publicKey = ""
     @State private var copied = false
+    @State private var isLoggedIn = false
 
     init(services: AppServices) {
         self.services = services
@@ -65,10 +72,14 @@ struct SetupEntry: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Label(services.client == nil ? "请先填写 Tesla 凭据" : "未找到车辆", systemImage: "exclamationmark.circle")
-                .font(.headline)
-            if services.client == nil {
-                Text("在设置中填写 Client ID / Secret 后重启应用，再登录与选择车辆。")
+            Label(
+                services.client == nil ? "请先填写 Tesla 凭据"
+                    : isLoggedIn ? "未找到车辆" : "未完成 Tesla 登录",
+                systemImage: "exclamationmark.circle"
+            )
+            .font(.headline)
+            if services.client == nil || !isLoggedIn {
+                Text("打开设置向导完成登录：凭据已自动回填，进入第 2 步点「登录 Tesla 账户」。")
                     .font(.caption).foregroundStyle(.secondary)
                 Button("打开设置向导…") { showWizard = true }
             } else {
@@ -98,8 +109,12 @@ struct SetupEntry: View {
             }
         }
         .padding(.vertical, 4)
+        .onAppear {
+            isLoggedIn = KeychainStore().hasToken(AuthService.refreshAccount)
+        }
         .sheet(isPresented: $showWizard) {
             SetupWizardView(wizard: SetupWizard())
+                .onDisappear { isLoggedIn = KeychainStore().hasToken(AuthService.refreshAccount) }
         }
     }
 }

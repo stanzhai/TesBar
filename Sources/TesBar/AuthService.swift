@@ -38,14 +38,16 @@ public struct HTTPStatusError: Error, Equatable, Sendable {
 
 /// Tesla OAuth 2 authorization-code flow + refresh (research §4).
 ///
-/// Token endpoint is the fleet-auth host (mandatory for server-to-server since 2025-08).
+/// China region: authorize + token live on the auth.tesla.cn tenant
+/// (developer.tesla.cn docs + its discovery doc). The fleet-auth host has no
+/// DNS record in .cn; the research note that invented it was wrong.
 /// Refresh tokens are single-use: a new one is persisted *before* the new access token,
 /// because a crash after that leaves a still-usable refresh token (old access tokens are
 /// invalidated server-side at refresh time; a stale refresh token would lock us out).
 public actor AuthService {
-    public static let tokenEndpoint = URL(string: "https://fleet-auth.prd.cn.vn.cloud.tesla.cn/oauth2/v3/token")!
-    public static let authorizeEndpoint = "https://auth.tesla.com/oauth2/v3/authorize"
-    public static let redirectURI = "https://auth.tesla.com/void/callback"
+    public static let tokenEndpoint = URL(string: "https://auth.tesla.cn/oauth2/v3/token")!
+    public static let authorizeEndpoint = "https://auth.tesla.cn/oauth2/v3/authorize"
+    public static let redirectURI = "https://auth.tesla.cn/void/callback"
     static let scope = "openid offline_access user_data vehicle_device_data vehicle_cmds vehicle_charging_cmds"
     static let accessAccount = "tesbar-access-token"
     static let refreshAccount = "tesbar-refresh-token"

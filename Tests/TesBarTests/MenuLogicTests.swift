@@ -35,13 +35,12 @@ struct MenuLogicTests {
 
     @Test func gateResetsForNextPress() {
         let gate = ConfirmGate()
-        let start = Date()
         gate.pressBegan()
-        gate.tick(at: start.addingTimeInterval(1.0))
+        gate.tick(at: Date().addingTimeInterval(1.0))
         gate.pressEnded() // reset after fire
         #expect(gate.state == .idle)
         gate.pressBegan()
-        gate.tick(at: start.addingTimeInterval(1.2))
+        gate.tick(at: Date().addingTimeInterval(1.0))
         #expect(gate.firedCount == 2)
     }
 

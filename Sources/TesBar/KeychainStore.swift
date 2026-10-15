@@ -33,6 +33,11 @@ public struct KeychainStore: Sendable {
         try deleteData(account: account)
     }
 
+    /// Presence check without throwing (UI uses this to decide guidance).
+    public func hasToken(_ account: String) -> Bool {
+        (try? data(account: account)) != nil
+    }
+
     // MARK: VCP private key
 
     public func savePrivateKey(_ pem: Data) throws {
