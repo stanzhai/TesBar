@@ -202,9 +202,9 @@ public final class SetupWizard {
 @available(macOS 14, *)
 public struct SetupWizardView: View {
     @Bindable var wizard: SetupWizard
+    @Environment(\.dismiss) private var dismiss
 
     public init(wizard: SetupWizard) { self.wizard = wizard }
-
     public var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text("TesBar 设置 · 第 \(stepIndex)/4 步")
@@ -238,6 +238,11 @@ public struct SetupWizardView: View {
         }
         .padding(16)
         .frame(width: 440)
+        .toolbar {
+            ToolbarItem(placement: .cancellationAction) {
+                Button("关闭") { dismiss() }
+            }
+        }
     }
 
     private var stepIndex: Int {
@@ -266,7 +271,7 @@ public struct SetupWizardView: View {
                 ? Button("验证连接") { Task { await wizard.verify() } }
                 : Button("完成设置") { wizard.complete() }
         case .done:
-            EmptyView()
+            Button("完成") { dismiss() }
         }
     }
 
