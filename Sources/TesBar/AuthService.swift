@@ -1,6 +1,7 @@
 import AppKit
 import AuthenticationServices
 import Foundation
+import Network
 import os
 /// Injectable HTTP seam: one request in, status/headers/body out.
 /// Production impl is ``URLSessionTransport``; tests script a stub.
@@ -47,7 +48,7 @@ public struct HTTPStatusError: Error, Equatable, Sendable {
 public actor AuthService {
     public static let tokenEndpoint = URL(string: "https://auth.tesla.cn/oauth2/v3/token")!
     public static let authorizeEndpoint = "https://auth.tesla.cn/oauth2/v3/authorize"
-    public static let redirectURI = "https://auth.tesla.cn/void/callback"
+    public static let redirectURI = "http://localhost:2610/auth"
     static let scope = "openid offline_access user_data vehicle_device_data vehicle_cmds vehicle_charging_cmds"
     static let accessAccount = "tesbar-access-token"
     static let refreshAccount = "tesbar-refresh-token"
@@ -91,48 +92,125 @@ public actor AuthService {
             URLQueryItem(name: "scope", value: Self.scope),
             URLQueryItem(name: "audience", value: audience),
         ]
-        let callback = try await runWebAuthentication(at: components.url!)
-
-        guard let items = URLComponents(url: callback, resolvingAgainstBaseURL: false)?.queryItems,
-              let code = items.first(where: { $0.name == "code" })?.value, !code.isEmpty
-        else { throw URLError(.cancelled) }
+        let code = try await Self.captureCode(at: components.url!)
+        guard !code.isEmpty else { throw URLError(.cancelled) }
         return code
     }
 
-    private func runWebAuthentication(at url: URL) async throws -> URL {
-        try await Self.presentWebAuthentication(url: url)
-    }
-
-    /// ASWebAuthenticationSession must start on the main thread and needs a strong
-    /// reference held while the sheet is up; `box` provides both.
+    /// Runs the auth sheet against the registered loopback redirect.
+    ///
+    /// ASWebAuthenticationSession intercepts custom-scheme callbacks but *not*
+    /// `http://localhost` (verified on macOS 27: the sheet navigates to the loopback
+    /// URL and stays open). So a local listener captures the code from the GET the
+    /// browser makes to the redirect URI, then we cancel the sheet ourselves.
     @MainActor
-    private static func presentWebAuthentication(url: URL) async throws -> URL {
+    private static func captureCode(at url: URL) async throws -> String {
+        guard let port = URLComponents(url: URL(string: redirectURI)!, resolvingAgainstBaseURL: false)?.port else {
+            throw URLError(.badURL)
+        }
+        let receiver = LoopbackCodeReceiver(port: UInt16(port))
+        try receiver.start()
+        defer { receiver.stop() }
+
         final class SessionBox: @unchecked Sendable {
             var session: ASWebAuthenticationSession?
-            var anchor: WebAuthAnchor?
         }
         let box = SessionBox()
-        let anchor = WebAuthAnchor()
-        return try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<URL, any Error>) in
-            let session = ASWebAuthenticationSession(url: url, callbackURLScheme: "https") { callbackURL, error in
-                box.session = nil
-                if let callbackURL {
-                    continuation.resume(returning: callbackURL)
-                } else {
-                    continuation.resume(throwing: error ?? URLError(.cancelled))
+        final class Once: @unchecked Sendable {
+            let lock = NSLock(); var done = false
+            func run(_ body: () -> Void) { lock.lock(); let d = done; done = true; lock.unlock(); if !d { body() } }
+        }
+        let once = Once()
+
+        return try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<String, any Error>) in
+                receiver.onCode = { [weak box] code in
+                    once.run {
+                        box?.session?.cancel()  // triggers completion handler; `once` makes its resume a no-op
+                        continuation.resume(returning: code)
+                    }
+                }
+                let session = ASWebAuthenticationSession(url: url, callbackURLScheme: "https") { _, error in
+                    // Sheet closed: user cancel, error page, or our own cancel after a captured code.
+                    receiver.onCode = nil
+                    once.run { continuation.resume(throwing: error ?? URLError(.cancelled)) }
+                }
+                session.presentationContextProvider = WebAuthAnchor()
+                session.prefersEphemeralWebBrowserSession = false
+                box.session = session
+                if !session.start() {
+                    once.run { continuation.resume(throwing: URLError(.cannotOpenFile)) }
                 }
             }
-            session.presentationContextProvider = anchor
-            box.anchor = anchor
-            session.prefersEphemeralWebBrowserSession = false
-            box.session = session
-            if !session.start() {
-                continuation.resume(throwing: URLError(.cannotOpenFile))
-            }
+        } onCancel: {
+            box.session?.cancel()
+            receiver.stop()
         }
     }
 }
 
+/// One-shot listener on the loopback redirect port; parses `?code=` from the GET
+/// the web sheet issues after Tesla's authorize endpoint redirects there.
+final class LoopbackCodeReceiver: @unchecked Sendable {
+    private let port: UInt16
+    private let queue = DispatchQueue(label: "com.tesbar.loopback")
+    private var listener: NWListener?
+    private let lock = NSLock()
+    private var storedCode: String?
+    private var handler: ((String) -> Void)?
+
+    /// Set from the session side; fires immediately if a code already arrived.
+    var onCode: ((String) -> Void)? {
+        get { lock.lock(); defer { lock.unlock() }; return handler }
+        set {
+            lock.lock(); handler = newValue
+            let code = storedCode; storedCode = nil
+            lock.unlock()
+            if let code, let handler { queue.async { handler(code) } }
+        }
+    }
+
+    init(port: UInt16) { self.port = port }
+
+    func start() throws {
+        let listener = try NWListener(using: .tcp, on: NWEndpoint.Port(rawValue: port)!)
+        listener.newConnectionHandler = { [weak self] conn in self?.handle(conn) }
+        listener.start(queue: queue)
+        self.listener = listener
+    }
+
+    func stop() {
+        listener?.cancel()
+        listener = nil
+    }
+
+    private func handle(_ conn: NWConnection) {
+        conn.start(queue: queue)
+        conn.receive(minimumIncompleteLength: 1, maximumLength: 65536) { data, _, _, error in
+            guard error == nil, let bytes = data,
+                  let request = String(data: bytes, encoding: .utf8),
+                  let path = request.split(separator: " ").dropFirst().first
+            else { conn.cancel(); return }
+            let query = String(path).split(separator: "?", maxSplits: 1).last.map(String.init) ?? ""
+            let code = URLComponents(string: "?" + query)?.queryItems?
+                .first(where: { $0.name == "code" })?.value ?? ""
+            let body = "<html><body>登录成功，可关闭此窗口。</body></html>"
+            let response = "HTTP/1.1 200 OK\r\nContent-Length: \(body.utf8.count)\r\nConnection: close\r\n\r\n\(body)"
+            conn.send(content: response.data(using: .utf8), completion: .contentProcessed { _ in
+                conn.cancel()
+                guard !code.isEmpty else { return }
+                self.lock.lock()
+                let alreadyStored = self.storedCode != nil
+                self.storedCode = code
+                let handler = self.handler
+                self.lock.unlock()
+                if !alreadyStored, let handler {
+                    self.queue.async { handler(code) }
+                }
+            })
+        }
+    }
+}
 /// Presents the login sheet attached to the app's current window (menu-bar app: any window will do).
 private final class WebAuthAnchor: NSObject, ASWebAuthenticationPresentationContextProviding {
     func presentationAnchor(for session: ASWebAuthenticationSession) -> ASPresentationAnchor {
