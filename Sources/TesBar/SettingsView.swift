@@ -60,7 +60,7 @@ struct SettingsView: View {
 struct SetupEntry: View {
     let services: AppServices
     @ObservedObject private var settings: AppSettings
-    @State private var showWizard = false
+    @Environment(\.openWindow) private var openWindow
     @State private var publicKey = ""
     @State private var copied = false
     @State private var isLoggedIn = false
@@ -81,7 +81,7 @@ struct SetupEntry: View {
             if services.client == nil || !isLoggedIn {
                 Text("打开设置向导完成登录：凭据已自动回填，进入第 2 步点「登录 Tesla 账户」。")
                     .font(.caption).foregroundStyle(.secondary)
-                Button("打开设置向导…") { showWizard = true }
+                Button("打开设置向导…") { openWindow(id: SetupWizardView.windowID) }
             } else {
                 Button("拉取车辆列表") { Task { await services.store.refreshNow() } }
                 if services.store.isLoading { ProgressView().controlSize(.small) }
@@ -111,10 +111,6 @@ struct SetupEntry: View {
         .padding(.vertical, 4)
         .onAppear {
             isLoggedIn = KeychainStore().hasToken(AuthService.refreshAccount)
-        }
-        .sheet(isPresented: $showWizard) {
-            SetupWizardView(wizard: SetupWizard())
-                .onDisappear { isLoggedIn = KeychainStore().hasToken(AuthService.refreshAccount) }
         }
     }
 }

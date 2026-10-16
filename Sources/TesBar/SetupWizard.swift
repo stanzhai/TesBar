@@ -201,6 +201,8 @@ public final class SetupWizard {
 
 @available(macOS 14, *)
 public struct SetupWizardView: View {
+    /// App scene id：`Window(id:)` 与 `openWindow(id:)` 共用。
+    public static let windowID = "setup-wizard"
     @Bindable var wizard: SetupWizard
     @Environment(\.dismiss) private var dismiss
 

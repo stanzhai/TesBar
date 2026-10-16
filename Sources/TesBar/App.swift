@@ -92,5 +92,21 @@ struct TesBarApp: App {
                 .task { await services.store.menuOpened() }
         }
         .menuBarExtraStyle(.window)
+
+        Window("TesBar 设置向导", id: SetupWizardView.windowID) {
+            SetupWizardWindow()
+        }
+        .windowResizability(.contentSize)
+    }
+}
+
+/// 向导独立窗口内容：`@State` 持有 wizard，窗口关闭即释放（重开从持久化恢复进度）。
+/// 不再用 MenuBarExtra 面板的 sheet —— 面板对 attached sheet 的尺寸/焦点变化会整体关闭。
+@available(macOS 14, *)
+private struct SetupWizardWindow: View {
+    @State private var wizard = SetupWizard()
+
+    var body: some View {
+        SetupWizardView(wizard: wizard)
     }
 }
