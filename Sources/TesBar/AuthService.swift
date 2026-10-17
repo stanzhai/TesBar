@@ -114,6 +114,7 @@ public actor AuthService {
 
         final class SessionBox: @unchecked Sendable {
             var session: ASWebAuthenticationSession?
+            var anchor: WebAuthAnchor?  // provider property is weak; keep it alive through start()
         }
         let box = SessionBox()
         final class Once: @unchecked Sendable {
@@ -135,9 +136,14 @@ public actor AuthService {
                     receiver.onCode = nil
                     once.run { continuation.resume(throwing: error ?? URLError(.cancelled)) }
                 }
-                session.presentationContextProvider = WebAuthAnchor()
+                let anchor = WebAuthAnchor()
+                session.presentationContextProvider = anchor
                 session.prefersEphemeralWebBrowserSession = false
+                box.anchor = anchor
                 box.session = session
+                // Accessory app: openWindow orders the wizard front without activating;
+                // ASWebAuthenticationSession refuses to present (error 2) unless active.
+                NSApp.activate(ignoringOtherApps: true)
                 if !session.start() {
                     once.run { continuation.resume(throwing: URLError(.cannotOpenFile)) }
                 }
@@ -212,11 +218,16 @@ final class LoopbackCodeReceiver: @unchecked Sendable {
     }
 }
 /// Presents the login sheet attached to the app's current window (menu-bar app: any window will do).
+///
+/// `NSApp.windows.first` is the (borderless) menu-bar panel — anchoring there makes
+/// ASWebAuthenticationSession fail with `canceledPresentationAnchor` (error 2) without
+/// ever showing the page. Prefer any window that can actually become main.
 private final class WebAuthAnchor: NSObject, ASWebAuthenticationPresentationContextProviding {
     func presentationAnchor(for session: ASWebAuthenticationSession) -> ASPresentationAnchor {
-        NSApplication.shared.keyWindow
-            ?? NSApplication.shared.mainWindow
-            ?? NSApplication.shared.windows.first
+        let app = NSApplication.shared
+        return app.keyWindow
+            ?? app.mainWindow
+            ?? app.windows.first { $0.canBecomeMain }
             ?? ASPresentationAnchor()
     }
 }
