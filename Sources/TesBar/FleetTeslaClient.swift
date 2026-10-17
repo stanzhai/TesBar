@@ -310,10 +310,10 @@ public actor FleetTeslaClient: TeslaClient {
         _ = try Self.mapStatus(r.status, r.body)
         return r.body
     }
-
     /// China conventions: 412 = account not registered → register via
     /// `POST /api/1/partner_accounts` (partner token) and retry the call once.
-    /// Registration is idempotent server-side; a repeated 412 after it surfaces as-is.
+    /// The endpoint resolves the key-hosting domain from the app's allowed_origins
+    /// (developer portal); we also send the pairing domain when configured.
     private func withPartnerRegistration(
         _ call: @Sendable () async throws -> (status: Int, headers: [String: String], body: Data)
     ) async throws -> (status: Int, headers: [String: String], body: Data) {
@@ -325,11 +325,20 @@ public actor FleetTeslaClient: TeslaClient {
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-        request.httpBody = Data("{}".utf8)
+        if let domain = defaults.string(forKey: "tesbarPairingDomain"),
+           !domain.trimmingCharacters(in: .whitespaces).isEmpty {
+            struct Body: Encodable { let domain: String }
+            request.httpBody = try? JSONEncoder().encode(
+                Body(domain: domain.trimmingCharacters(in: .whitespaces)))
+        }
         let registration = try await transport.send(request)
         if !(200...299).contains(registration.status) {
-            logger.error("partner_accounts registration → \(registration.status): \(Self.bodySnippet(registration.body) ?? "<empty body>")")
-            throw HTTPStatusError(412, body: "账户注册失败（\(registration.status)）：\(Self.bodySnippet(registration.body) ?? "")")
+            let snippet = Self.bodySnippet(registration.body) ?? "<empty body>"
+            logger.error("partner_accounts registration → \(registration.status): \(snippet)")
+            let hint = registration.status == 400
+                ? "（域名未在 developer.tesla.cn 的 allowed_origins 配置，或该域名未托管 /.well-known/appspecific/com.tesla.3p.public-key.pem 公钥）"
+                : ""
+            throw HTTPStatusError(412, body: "账户注册失败（\(registration.status)）：\(snippet)\(hint)")
         }
         logger.notice("partner account registered")
         return try await call()

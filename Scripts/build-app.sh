@@ -47,9 +47,51 @@ PLIST
 echo "==> copy binary"
 cp "$(swift build -c release --show-bin-path)/TesBar" "$contents/MacOS/TesBar"
 
-echo "==> codesign (ad-hoc, best-effort)"
-if ! codesign --force --deep -s - --options runtime "$app"; then
-  echo "warning: codesign 失败，App 未签名（不影响本地使用）" >&2
+echo "==> codesign (stable local identity)"
+# Ad-hoc signing re-hashes every build, so keychain ACLs bound to the old build
+# prompt on every read ("始终允许" never sticks). A fixed self-signed identity
+# in a dedicated keychain keeps the ACL designator stable across rebuilds —
+# one approval, done. Trust is NOT required for local runs (Gatekeeper aside),
+# codesign accepts an untrusted self-signed identity.
+identity="TesBar Local Signing"
+sign_keychain="$HOME/Library/Keychains/tesbar-sign.keychain-db"
+if ! security find-identity "$sign_keychain" 2>/dev/null | grep -q "$identity"; then
+  echo "  creating self-signed codesigning identity (once)"
+  tmpdir="$(mktemp -d)"
+  cat > "$tmpdir/cert.conf" <<CERT
+[req]
+prompt = no
+distinguished_name = dn
+x509_extensions = ext
+[dn]
+CN = $identity
+O = TesBar
+[ext]
+basicConstraints = critical,CA:FALSE
+keyUsage = critical,digitalSignature
+extendedKeyUsage = codeSigning
+CERT
+  openssl req -x509 -newkey rsa:2048 -nodes -days 3650 \
+    -keyout "$tmpdir/key.pem" -out "$tmpdir/cert.pem" \
+    -config "$tmpdir/cert.conf" >/dev/null 2>&1
+  openssl pkcs12 -export -out "$tmpdir/identity.p12" \
+    -inkey "$tmpdir/key.pem" -in "$tmpdir/cert.pem" -passout pass:tesbar-sign \
+    >/dev/null 2>&1
+  security create-keychain -p tesbar-sign "$sign_keychain" >/dev/null 2>&1 || true
+  security import "$tmpdir/identity.p12" -k "$sign_keychain" -P tesbar-sign \
+    -A -T /usr/bin/codesign >/dev/null 2>&1
+  security set-key-partition-list -S apple-tool:,apple: -s -k tesbar-sign \
+    "$sign_keychain" >/dev/null 2>&1
+  # Make codesign see the keychain without permanently touching the search list.
+  security list-keychain -s ~/Library/Keychains/login.keychain-db "$sign_keychain" >/dev/null 2>&1
+  rm -rf "$tmpdir"
+fi
+if codesign --force --deep -s "$identity" --keychain "$sign_keychain" --options runtime "$app" 2>/dev/null; then
+  codesign -dv "$app" 2>&1 | grep -q "Authority=$identity" && echo "  signed with $identity"
+else
+  echo "warning: 稳定签名失败，退回 ad-hoc（keychain 会反复弹窗）" >&2
+  codesign --force --deep -s - --options runtime "$app" || \
+    echo "warning: codesign 失败，App 未签名（不影响本地使用）" >&2
 fi
 
 echo "==> ${repo_root}/${app}"
