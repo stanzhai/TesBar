@@ -285,24 +285,54 @@ public actor FleetTeslaClient: TeslaClient {
     private func sendSignedCommand(_ bytes: Data, vin: String) async throws -> RoutableMessage {
         struct Body: Encodable { let routable_message: String }
         let json = try JSONEncoder().encode(Body(routable_message: bytes.base64EncodedString()))
-        let r = try await auth.authorized {
-            let r = try await self.send(path: "/api/1/vehicles/\(vin)/signed_command", body: json)
-            _ = try Self.mapStatus(r.status, r.body)
-            return r
+        let r = try await withPartnerRegistration {
+            try await self.auth.authorized {
+                let r = try await self.send(path: "/api/1/vehicles/\(vin)/signed_command", body: json)
+                _ = try Self.mapStatus(r.status, r.body)
+                return r
+            }
         }
         return try decodeSignedResponse(status: r.status, body: r.body)
     }
 
     private func get(path: String) async throws -> Data {
-        let r = try await auth.authorized { try await self.send(path: path, body: nil) }
+        let r = try await withPartnerRegistration {
+            try await self.auth.authorized { try await self.send(path: path, body: nil) }
+        }
         _ = try Self.mapStatus(r.status, r.body)
         return r.body
     }
 
     private func post(path: String) async throws -> Data {
-        let r = try await auth.authorized { try await self.send(path: path, body: Data("{}".utf8)) }
+        let r = try await withPartnerRegistration {
+            try await self.auth.authorized { try await self.send(path: path, body: Data("{}".utf8)) }
+        }
         _ = try Self.mapStatus(r.status, r.body)
         return r.body
+    }
+
+    /// China conventions: 412 = account not registered → register via
+    /// `POST /api/1/partner_accounts` (partner token) and retry the call once.
+    /// Registration is idempotent server-side; a repeated 412 after it surfaces as-is.
+    private func withPartnerRegistration(
+        _ call: @Sendable () async throws -> (status: Int, headers: [String: String], body: Data)
+    ) async throws -> (status: Int, headers: [String: String], body: Data) {
+        let first = try await call()
+        guard first.status == 412 else { return first }
+        logger.notice("412 — registering partner account, then retrying once")
+        let token = try await auth.partnerAccessToken()
+        var request = URLRequest(url: resolver.baseURL.appendingPathComponent("/api/1/partner_accounts"))
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        request.httpBody = Data("{}".utf8)
+        let registration = try await transport.send(request)
+        if !(200...299).contains(registration.status) {
+            logger.error("partner_accounts registration → \(registration.status): \(Self.bodySnippet(registration.body) ?? "<empty body>")")
+            throw HTTPStatusError(412, body: "账户注册失败（\(registration.status)）：\(Self.bodySnippet(registration.body) ?? "")")
+        }
+        logger.notice("partner account registered")
+        return try await call()
     }
 
     /// One request out through the region-aware transport; no status check here — callers

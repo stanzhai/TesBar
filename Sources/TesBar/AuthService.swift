@@ -252,6 +252,22 @@ private final class WebAuthAnchor: NSObject, ASWebAuthenticationPresentationCont
 extension AuthService {
     // MARK: Token endpoint
 
+    /// Partner auth token (client_credentials, partner-tokens doc): the token type
+    /// `POST /api/1/partner_accounts` registration requires. Not persisted — used once.
+    public func partnerAccessToken() async throws -> String {
+        let response = try await tokenResponse(fields: [
+            ("grant_type", "client_credentials"),
+            ("client_id", clientID),
+            ("client_secret", clientSecret),
+            ("scope", Self.scope),
+            ("audience", audience),
+        ])
+        guard let token = response.accessToken, !token.isEmpty else {
+            throw HTTPStatusError(200, body: "token endpoint returned no access_token")
+        }
+        return token
+    }
+
     /// Exchanges an authorization code for tokens and persists them.
     func exchange(code: String) async throws {
         let response = try await tokenResponse(fields: [

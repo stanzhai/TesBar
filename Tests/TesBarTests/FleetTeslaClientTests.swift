@@ -537,6 +537,28 @@ struct FleetTeslaClientTests {
         }
     }
 
+    @Test func unregistered412RegistersPartnerAccountAndRetries() async throws {
+        let vehicle = VehicleSim()
+        let transport = FleetScriptedTransport(
+            vehicle: vehicle,
+            auth: [(status: 200, json: #"{"access_token":"partner-at","expires_in":28800}"#)],
+            fleet: [
+                .error(status: 412, body: #"{"error":"Account cid must be registered"}"#),  // first list
+                .error(status: 200, body: "{}"),   // partner_accounts registration
+                .json(Self.listJSON),              // retry succeeds
+            ])
+        let (client, _, _) = try makeClient(transport, service: "com.tesbar.fleet-tests-4")
+
+        let vehicles = try await client.listVehicles()
+        #expect(vehicles.count == 1)
+
+        let registerIdx = try #require(transport.calls.firstIndex { $0.url.contains("partner_accounts") })
+        #expect(transport.calls[registerIdx].method == "POST")
+        // The retry is a second GET /api/1/vehicles after registration.
+        let listCalls = transport.calls.filter { $0.url.hasSuffix("/api/1/vehicles") }
+        #expect(listCalls.count == 2)
+    }
+
     @Test func unauthorized401RefreshesAndRetries() async throws {
         let vehicle = VehicleSim()
         let transport = FleetScriptedTransport(
