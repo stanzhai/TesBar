@@ -187,9 +187,14 @@ private func makeWizard(
     #expect(defaults.string(forKey: SetupWizard.domainKey) == "example.com")
 }
 
-@available(macOS 14, *) @Test func reauthRequiredMapsToReloginGuidance() {
+@available(macOS 14, *) @Test func authErrorsMapToGuidance() {
     #expect(SetupWizard.guidanceMessage(AuthError.reauthRequired).contains("重新登录"))
     #expect(SetupWizard.guidanceMessage(AuthError.refreshTokenInvalid).contains("重新登录"))
+    // Bad client_id/secret must point at the credentials step, not "re-login".
+    let msg = SetupWizard.guidanceMessage(AuthError.clientCredentialsRejected("combo invalid"))
+    #expect(msg.contains("client_id"))
+    #expect(msg.contains("combo invalid"))
+    #expect(!msg.contains("重新登录"))
 }
 
 /// 向导用的最小 TeslaClient 假实现（ScriptedTeslaClient 的 listVehicles 固定返回空，单独造一个）。

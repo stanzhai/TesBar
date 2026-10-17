@@ -16,7 +16,13 @@ struct MenuLogicTests {
         let start = Date()
         gate.pressBegan()
         gate.tick(at: start.addingTimeInterval(0.5))
-        #expect(gate.state == .pressing(progress: 0.5))
+        // pressBegan samples the clock again, so elapsed is 0.5 minus a few µs —
+        // exact equality is inherently flaky; assert with tolerance.
+        if case .pressing(let progress) = gate.state {
+            #expect(abs(progress - 0.5) < 0.05)
+        } else {
+            #expect(gate.state == .pressing(progress: 0.5))
+        }
         gate.pressEnded()
         #expect(gate.state == .idle)
         #expect(gate.firedCount == 0)

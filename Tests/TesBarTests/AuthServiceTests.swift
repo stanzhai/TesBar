@@ -43,7 +43,10 @@ private final class StubTransport: HTTPExecuting, @unchecked Sendable {
         for pair in query.split(separator: "&") {
             let parts = pair.split(separator: "=", maxSplits: 1).map(String.init)
             guard parts.count == 2 else { continue }
-            fields[parts[0]] = parts[1].removingPercentEncoding ?? parts[1]
+            // Form semantics: a literal `+` in a value must arrive percent-encoded
+            // (%2B); decoding it as space would mask exactly the bug under test.
+            let value = parts[1].replacingOccurrences(of: "+", with: "%2B")
+            fields[parts[0]] = value.removingPercentEncoding ?? value
         }
         return fields
     }
@@ -159,7 +162,7 @@ struct AuthServiceTests {
         await #expect(throws: AuthError.refreshTokenInvalid) { try await service.refresh() }
     }
 
-    @Test func tokenEndpoint400MapsToRefreshTokenInvalid() async throws {
+    @Test func tokenEndpointInvalidGrantMapsToRefreshTokenInvalid() async throws {
         let store = KeychainStore()
         try store.saveToken("rt1", for: AuthService.refreshAccount)
         defer { try? store.deleteToken(AuthService.refreshAccount) }
@@ -177,6 +180,19 @@ struct AuthServiceTests {
         }
     }
 
+    @Test func unauthorizedClientMapsToClientCredentialsRejected() async throws {
+        // Probed against auth.tesla.cn: real client_id + wrong secret returns this body.
+        let transport = StubTransport([
+            (status: 400, json: #"{"error":"unauthorized_client","error_description":"The 'client_id' and 'client_secret' combination is invalid."}"#),
+        ])
+        let service = makeService(transport)
+
+        await #expect(throws: AuthError.clientCredentialsRejected(
+            "The 'client_id' and 'client_secret' combination is invalid.")) {
+            try await service.exchange(code: "c")
+        }
+    }
+
     @Test func loginRequiredBodyMapsToRefreshTokenInvalid() async throws {
         let store = KeychainStore()
         try store.saveToken("rt1", for: AuthService.refreshAccount)
@@ -185,6 +201,22 @@ struct AuthServiceTests {
         let service = makeService(transport)
 
         await #expect(throws: AuthError.refreshTokenInvalid) { try await service.refresh() }
+    }
+
+    // MARK: form encoding
+
+    @Test func formBodyPercentEncodesSpecialCharactersInSecret() async throws {
+        let transport = StubTransport([(status: 200, json: Self.exchangeOK())])
+        let service = AuthService(
+            clientID: "cid", clientSecret: "ab+cd&ef=gh ij%",
+            audience: "aud", transport: transport, keychain: KeychainStore()
+        )
+
+        try await service.exchange(code: "the-code")
+
+        let body = String(decoding: transport.calls[0].request.httpBody ?? Data(), as: UTF8.self)
+        #expect(body.contains("client_secret=ab%2Bcd%26ef%3Dgh%20ij%25"))
+        #expect(transport.calls[0].body["client_secret"] == "ab+cd&ef=gh ij%")
     }
 
     // MARK: authorized: 401 retry

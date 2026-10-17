@@ -7,7 +7,10 @@ import Testing
 /// 真 Keychain 集成测试（ticket 02 记载的例外）。
 /// 账户名带 UUID 后缀，测试结束删除，保证重跑全绿。
 struct KeychainStoreTests {
-    let store = KeychainStore()
+    /// Isolated service like every other suite: the default `com.tesbar.app`
+    /// namespace holds real app items whose ACL blocks test binaries (prompt /
+    /// hang in headless runs once the app has created its key).
+    let store = KeychainStore(service: "KeychainStoreTests-\(UUID().uuidString)")
     let run = UUID().uuidString
 
     @Test func saveReadRoundTrip() throws {

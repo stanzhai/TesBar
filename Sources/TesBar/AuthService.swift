@@ -25,10 +25,12 @@ public struct URLSessionTransport: HTTPExecuting {
 }
 
 public enum AuthError: Error, Equatable {
-    /// Token endpoint rejected the refresh token (HTTP 400/401 or body `login_required`).
+    /// Token endpoint rejected the refresh token (body `login_required`/`invalid_grant`, or 400/401 without a readable error).
     case refreshTokenInvalid
     /// Refresh failed inside ``AuthService/authorized(_:)`` — observable signal for 09/10 to guide re-login (user story 34).
     case reauthRequired
+    /// Token endpoint rejected client_id/client_secret (`unauthorized_client`) — bad credentials, not a stale login.
+    case clientCredentialsRejected(String)
 }
 
 /// HTTP-level failure carried in thrown errors; ``AuthService/authorized(_:)`` triggers one refresh+retry on 401.
@@ -306,11 +308,13 @@ extension AuthService {
         let accessToken: String?
         let refreshToken: String?
         let error: String?
+        let errorDescription: String?
 
         enum CodingKeys: String, CodingKey {
             case accessToken = "access_token"
             case refreshToken = "refresh_token"
             case error
+            case errorDescription = "error_description"
         }
     }
 
@@ -318,9 +322,14 @@ extension AuthService {
         var request = URLRequest(url: Self.tokenEndpoint)
         request.httpMethod = "POST"
         request.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
-        var body = URLComponents()
-        body.queryItems = fields.map { URLQueryItem(name: $0.0, value: $0.1) }
-        request.httpBody = body.percentEncodedQuery?.data(using: .utf8)
+        // RFC 3986 unreserved set only. URLComponents.queryItems leaves `+` bare
+        // (form decoding reads it as a space) and only escapes `&`/`=` — a secret
+        // containing either is corrupted into a 400.
+        let unreserved = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "-._~"))
+        let encoded = fields.map { name, value in
+            "\(name.addingPercentEncoding(withAllowedCharacters: unreserved)!)=\(value.addingPercentEncoding(withAllowedCharacters: unreserved)!)"
+        }.joined(separator: "&")
+        request.httpBody = Data(encoded.utf8)
 
         let (status, _, data) = try await transport.send(request)
         let decoded = try? JSONDecoder().decode(TokenResponse.self, from: data)
@@ -329,6 +338,12 @@ extension AuthService {
             guard let decoded, let token = decoded.accessToken, !token.isEmpty else { throw HTTPStatusError(status) }
             return decoded
         case 400, 401:
+            // unauthorized_client = credentials rejected; other errors at this
+            // endpoint mean the grant (code/refresh token) was refused.
+            if decoded?.error == "unauthorized_client" {
+                throw AuthError.clientCredentialsRejected(
+                    decoded?.errorDescription ?? "client_id 与 client_secret 组合被服务端拒绝")
+            }
             throw AuthError.refreshTokenInvalid
         default:
             if decoded?.error == "login_required" { throw AuthError.refreshTokenInvalid }

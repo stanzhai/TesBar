@@ -98,11 +98,14 @@ public final class SetupWizard {
 
     public var pairingURL: URL? { Self.pairingURL(domain: domain) }
 
-    /// 登录失败文案：reauthRequired/refreshTokenInvalid 给重登指引（user story 34），其余原样。
+    /// 登录失败文案：reauthRequired/refreshTokenInvalid 给重登指引（user story 34），
+    /// clientCredentialsRejected 指向凭据本身（服务端拒绝 client_id/secret，重登无用），其余原样。
     nonisolated public static func guidanceMessage(_ error: Error) -> String {
         switch error as? AuthError {
         case .reauthRequired: return "登录已失效，请返回上一步重新登录"
         case .refreshTokenInvalid: return "登录凭据无效，请重新登录"
+        case .clientCredentialsRejected(let detail):
+            return "Tesla 服务端拒绝了 client_id 与 client_secret（\(detail)）。请返回第一步检查凭据。"
         default: return (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
         }
     }

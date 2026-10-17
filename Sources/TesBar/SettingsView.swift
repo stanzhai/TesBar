@@ -81,7 +81,13 @@ struct SetupEntry: View {
             if services.client == nil || !isLoggedIn {
                 Text("打开设置向导完成登录：凭据已自动回填，进入第 2 步点「登录 Tesla 账户」。")
                     .font(.caption).foregroundStyle(.secondary)
-                Button("打开设置向导…") { openWindow(id: SetupWizardView.windowID) }
+                // Accessory app: openWindow orders the window front without activating it,
+                // so the wizard appears behind whatever has focus and the menu panel
+                // (dismissed on activation loss) stays up. Activate first.
+                Button("打开设置向导…") {
+                    NSApp.activate(ignoringOtherApps: true)
+                    openWindow(id: SetupWizardView.windowID)
+                }
             } else {
                 Button("拉取车辆列表") { Task { await services.store.refreshNow() } }
                 if services.store.isLoading { ProgressView().controlSize(.small) }
