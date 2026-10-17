@@ -521,6 +521,22 @@ struct FleetTeslaClientTests {
         }
     }
 
+    @Test func unmappedStatusCarriesBodyInError() async throws {
+        let transport = FleetScriptedTransport(
+            vehicle: VehicleSim(),
+            fleet: [.json(Self.listJSON),
+                    .error(status: 403, body: #"{"error":"forbidden","error_description":"client not authorized for vehicle"}"#)])
+        let (client, _, _) = try makeClient(transport, service: "com.tesbar.fleet-tests-3")
+        do {
+            try await client.signAndSend(command: .lock, vehicleID: Self.vehicleID)
+            Issue.record("expected HTTPStatusError")
+        } catch let error as HTTPStatusError {
+            #expect(error.status == 403)
+            #expect(error.body == "client not authorized for vehicle")
+            #expect(error.errorDescription == "Fleet API 返回 HTTP 403：client not authorized for vehicle")
+        }
+    }
+
     @Test func unauthorized401RefreshesAndRetries() async throws {
         let vehicle = VehicleSim()
         let transport = FleetScriptedTransport(

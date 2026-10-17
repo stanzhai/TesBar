@@ -64,6 +64,11 @@ private func jwt(exp: TimeInterval) -> String {
 
 @Suite(.serialized)  // fixed Keychain accounts are shared — serialize the tests
 struct AuthServiceTests {
+    /// Isolated service: the default `com.tesbar.app` namespace holds real app
+    /// items once the user has logged in; their ACL blocks the test binary
+    /// (authorization prompt / hang in headless runs).
+    private let isolatedKeychain = KeychainStore(service: "AuthServiceTests-\(UUID().uuidString)")
+
     /// Scripted happy-path exchange response.
     private static func exchangeOK(refresh: String = "rt-new") -> String {
         #"{"access_token":"\#(jwt(exp: Date().addingTimeInterval(28800).timeIntervalSince1970))","refresh_token":"\#(refresh)","expires_in":28800}"#
@@ -74,7 +79,7 @@ struct AuthServiceTests {
         AuthService(
             clientID: "cid", clientSecret: "secret",
             audience: "https://fleet-api.prd.cn.vn.cloud.tesla.cn",
-            transport: transport, keychain: KeychainStore()
+            transport: transport, keychain: isolatedKeychain
         )
     }
 
@@ -120,17 +125,17 @@ struct AuthServiceTests {
     @Test func refreshPersistsBothTokensAtomically() async throws {
         let transport = StubTransport([(status: 200, json: Self.refreshOK)])
         let service = makeService(transport)
-        try KeychainStore().saveToken("rt1", for: AuthService.refreshAccount)
-        try KeychainStore().saveToken("at1", for: AuthService.accessAccount)
+        try isolatedKeychain.saveToken("rt1", for: AuthService.refreshAccount)
+        try isolatedKeychain.saveToken("at1", for: AuthService.accessAccount)
         defer {
-            try? KeychainStore().deleteToken(AuthService.refreshAccount)
-            try? KeychainStore().deleteToken(AuthService.accessAccount)
+            try? isolatedKeychain.deleteToken(AuthService.refreshAccount)
+            try? isolatedKeychain.deleteToken(AuthService.accessAccount)
         }
 
         try await service.refresh()
 
         #expect(try await service.currentAccessToken() == "at2")
-        #expect(try KeychainStore().readToken(AuthService.refreshAccount) == "rt2")
+        #expect(try isolatedKeychain.readToken(AuthService.refreshAccount) == "rt2")
         let call = try #require(transport.calls.first)
         #expect(call.body["grant_type"] == "refresh_token")
         #expect(call.body["client_id"] == "cid")
@@ -139,7 +144,7 @@ struct AuthServiceTests {
     }
 
     @Test func refreshResponseWithoutNewRefreshTokenKeepsOld() async throws {
-        let store = KeychainStore()
+        let store = isolatedKeychain
         try store.saveToken("rt-old", for: AuthService.refreshAccount)
         try store.saveToken("at-old", for: AuthService.accessAccount)
         defer {
@@ -156,14 +161,14 @@ struct AuthServiceTests {
     }
 
     @Test func refreshWithoutStoredRefreshTokenThrowsInvalid() async throws {
-        try? KeychainStore().deleteToken(AuthService.refreshAccount)
+        try? isolatedKeychain.deleteToken(AuthService.refreshAccount)
         let service = makeService(StubTransport([(status: 200, json: Self.refreshOK)]))
 
         await #expect(throws: AuthError.refreshTokenInvalid) { try await service.refresh() }
     }
 
     @Test func tokenEndpointInvalidGrantMapsToRefreshTokenInvalid() async throws {
-        let store = KeychainStore()
+        let store = isolatedKeychain
         try store.saveToken("rt1", for: AuthService.refreshAccount)
         defer { try? store.deleteToken(AuthService.refreshAccount) }
         for status in [400, 401] {
@@ -194,7 +199,7 @@ struct AuthServiceTests {
     }
 
     @Test func loginRequiredBodyMapsToRefreshTokenInvalid() async throws {
-        let store = KeychainStore()
+        let store = isolatedKeychain
         try store.saveToken("rt1", for: AuthService.refreshAccount)
         defer { try? store.deleteToken(AuthService.refreshAccount) }
         let transport = StubTransport([(status: 403, json: #"{"error":"login_required"}"#)])
@@ -209,7 +214,7 @@ struct AuthServiceTests {
         let transport = StubTransport([(status: 200, json: Self.exchangeOK())])
         let service = AuthService(
             clientID: "cid", clientSecret: "ab+cd&ef=gh ij%",
-            audience: "aud", transport: transport, keychain: KeychainStore()
+            audience: "aud", transport: transport, keychain: isolatedKeychain
         )
 
         try await service.exchange(code: "the-code")
@@ -237,11 +242,11 @@ struct AuthServiceTests {
         // First API call 401s; refresh succeeds; retry succeeds.
         let transport = StubTransport([(status: 200, json: Self.refreshOK)])
         let service = makeService(transport)
-        try KeychainStore().saveToken("rt1", for: AuthService.refreshAccount)
-        try KeychainStore().saveToken("at1", for: AuthService.accessAccount)
+        try isolatedKeychain.saveToken("rt1", for: AuthService.refreshAccount)
+        try isolatedKeychain.saveToken("at1", for: AuthService.accessAccount)
         defer {
-            try? KeychainStore().deleteToken(AuthService.refreshAccount)
-            try? KeychainStore().deleteToken(AuthService.accessAccount)
+            try? isolatedKeychain.deleteToken(AuthService.refreshAccount)
+            try? isolatedKeychain.deleteToken(AuthService.accessAccount)
         }
 
         let attempts = Counter()
@@ -258,8 +263,8 @@ struct AuthServiceTests {
     @Test func authorizedRefreshFailureThrowsReauthRequiredAndDoesNotRetry() async throws {
         let transport = StubTransport([(status: 400, json: #"{"error":"invalid_grant"}"#)])
         let service = makeService(transport)
-        try KeychainStore().saveToken("rt-bad", for: AuthService.refreshAccount)
-        defer { try? KeychainStore().deleteToken(AuthService.refreshAccount) }
+        try isolatedKeychain.saveToken("rt-bad", for: AuthService.refreshAccount)
+        defer { try? isolatedKeychain.deleteToken(AuthService.refreshAccount) }
 
         let attempts = Counter()
         await #expect(throws: AuthError.reauthRequired) {
@@ -281,7 +286,7 @@ struct AuthServiceTests {
     // MARK: startup exp check
 
     @Test func ensureFreshAccessTokenRefreshesWhenExpired() async throws {
-        let store = KeychainStore()
+        let store = isolatedKeychain
         try store.saveToken("rt1", for: AuthService.refreshAccount)
         try store.saveToken(jwt(exp: Date().timeIntervalSince1970 - 10), for: AuthService.accessAccount)
         defer {
@@ -297,7 +302,7 @@ struct AuthServiceTests {
     }
 
     @Test func ensureFreshAccessTokenSkipsWhenValid() async throws {
-        let store = KeychainStore()
+        let store = isolatedKeychain
         try store.saveToken("rt1", for: AuthService.refreshAccount)
         try store.saveToken(jwt(exp: Date().addingTimeInterval(3600).timeIntervalSince1970), for: AuthService.accessAccount)
         defer {

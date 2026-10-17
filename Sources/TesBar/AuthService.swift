@@ -36,7 +36,22 @@ public enum AuthError: Error, Equatable {
 /// HTTP-level failure carried in thrown errors; ``AuthService/authorized(_:)`` triggers one refresh+retry on 401.
 public struct HTTPStatusError: Error, Equatable, Sendable {
     public let status: Int
-    public init(_ status: Int) { self.status = status }
+    /// Response body snippet (up to ~200 chars) when the caller captured one —
+    /// Tesla puts `error_description` here; without it the UI shows a bare type name.
+    public let body: String?
+
+    public init(_ status: Int, body: String? = nil) {
+        self.status = status
+        self.body = body
+    }
+}
+
+extension HTTPStatusError: LocalizedError {
+    public var errorDescription: String? {
+        var text = "Fleet API 返回 HTTP \(status)"
+        if let body, !body.isEmpty { text += "：\(body)" }
+        return text
+    }
 }
 
 /// Tesla OAuth 2 authorization-code flow + refresh (research §4).

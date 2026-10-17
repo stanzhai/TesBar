@@ -310,14 +310,20 @@ public actor FleetTeslaClient: TeslaClient {
     private func send(path: String, body: Data?) async throws
         -> (status: Int, headers: [String: String], body: Data)
     {
-        var request = URLRequest(url: resolver.baseURL.appendingPathComponent(path))
+        let base = resolver.baseURL
+        var request = URLRequest(url: base.appendingPathComponent(path))
         request.httpMethod = body == nil ? "GET" : "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         if let token = try? await auth.currentAccessToken() {
             request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         }
         request.httpBody = body
-        return try await transport.send(request)
+        let r = try await transport.send(request)
+        if !(200...299).contains(r.status) {
+            // One line per failed call — `log show` is the only telemetry this app has.
+            logger.error("Fleet API \(request.httpMethod ?? "GET") \(path) → \(r.status) via \(base.host ?? "?"): \(Self.bodySnippet(r.body) ?? "<empty body>")")
+        }
+        return r
     }
 
     /// `{"response": "<base64>"}` → RoutableMessage.
@@ -330,7 +336,8 @@ public actor FleetTeslaClient: TeslaClient {
 
     /// Go inet.go status map: 422 protocol-unsupported, 503 asleep,
     /// 408 + "vehicle is offline" asleep; other non-OK surfaces as `HTTPStatusError`
-    /// (401 feeds the authorized() retry).
+    /// (401 feeds the authorized() retry). The body snippet rides along so the UI
+    /// shows the server's own message instead of a bare type name.
     private static func mapStatus(_ status: Int, _ body: Data) throws {
         switch status {
         case 200: return
@@ -338,8 +345,20 @@ public actor FleetTeslaClient: TeslaClient {
         case 503: throw FleetError.vehicleNotAwake
         case 408 where body.range(of: Data("vehicle is offline".utf8)) != nil:
             throw FleetError.vehicleNotAwake
-        default: throw HTTPStatusError(status)
+        default: throw HTTPStatusError(status, body: Self.bodySnippet(body))
         }
+    }
+
+    /// Response body trimmed to a one-line snippet; JSON `error_description` wins when present.
+    static func bodySnippet(_ data: Data) -> String? {
+        guard !data.isEmpty else { return nil }
+        let text = String(decoding: data.prefix(512), as: UTF8.self)
+        if let json = try? JSONSerialization.jsonObject(with: Data(text.utf8)) as? [String: Any] {
+            for key in ["error_description", "error", "message"] {
+                if let value = json[key] as? String { return String(value.prefix(200)) }
+            }
+        }
+        return String(text.split(separator: "\n").first ?? "").prefix(200).description
     }
 
     static func randomBytes(_ count: Int) -> Data {
