@@ -1,7 +1,13 @@
 import Foundation
 import Security
 
-/// 凭证存取：access/refresh token → Keychain（VCP 私钥已改为构建内置，ADR-0004）。
+/// 凭证存取：access/refresh token → 本地 0600 文件（VCP 私钥已改为构建内置，ADR-0004）。
+///
+/// 为什么不用 Keychain：app 以 adhoc 签名分发，每次重打包 CDHash 都变，
+/// 条目 ACL 记录的是创建时那个二进制 → 之后每次读都弹“钥匙串访问”授权框
+/// （输登录密码）。Developer ID 签名前，Keychain 对这类 app 不可用。
+/// 文件方案：`~/Library/Application Support/<service>/` 目录 0700、文件 0600，
+/// 本机其他用户的进程读不到；同用户进程与读二进制内嵌的 client secret 门槛相同。
 public enum KeychainError: Error, Equatable {
     case unhandled(OSStatus)
     case itemNotFound
@@ -28,7 +34,9 @@ public struct KeychainStore: Sendable {
     }
 
     public func deleteToken(_ account: String) throws {
-        try deleteData(account: account)
+        try? FileManager.default.removeItem(at: url(account: account))
+        // 旧版本可能还留有 Keychain 条目；顺手清掉（不存在则忽略）。
+        SecItemDelete(legacyQuery(account: account) as CFDictionary)
     }
 
     /// Presence check without throwing (UI uses this to decide guidance).
@@ -36,53 +44,58 @@ public struct KeychainStore: Sendable {
         (try? data(account: account)) != nil
     }
 
-    // MARK: SecItem CRUD
+    // MARK: File storage
 
-    private func baseQuery(account: String) -> [String: Any] {
+    private func url(account: String) -> URL {
+        directory().appendingPathComponent(account.addingPercentEncoding(
+            withAllowedCharacters: .alphanumerics
+        ) ?? account)
+    }
+
+    private func directory() -> URL {
+        let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+        return base.appendingPathComponent(service, isDirectory: true)
+    }
+
+    private func setData(_ data: Data, account: String) throws {
+        let dir = directory()
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true,
+                                                 attributes: [.posixPermissions: 0o700])
+        let file = url(account: account)
+        try data.write(to: file, options: .atomic)
+        // Data.write 的 attributes 只在新建时生效，atomic 覆盖写可能保留旧模式；显式收紧。
+        try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: file.path)
+    }
+
+    private func data(account: String) throws -> Data? {
+        let fileURL = url(account: account)
+        guard let data = try? Data(contentsOf: fileURL) else {
+            // 一次性迁移：Keychain 时代的旧条目 → 文件（读取可能弹最后一次授权框，
+            // 用户点“始终允许”或拒绝都行；拒绝则视为无 token，走重登）。
+            var query = legacyQuery(account: account)
+            query[kSecReturnData as String] = true
+            query[kSecMatchLimit as String] = kSecMatchLimitOne
+            var result: AnyObject?
+            switch SecItemCopyMatching(query as CFDictionary, &result) {
+            case errSecSuccess:
+                let old = result as? Data
+                if let old { try? setData(old, account: account) }
+                SecItemDelete(query as CFDictionary)
+                return old
+            case errSecItemNotFound:
+                return nil
+            case let status:
+                throw KeychainError.unhandled(status)
+            }
+        }
+        return data
+    }
+
+    private func legacyQuery(account: String) -> [String: Any] {
         [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
             kSecAttrAccount as String: account,
         ]
-    }
-
-    private func setData(_ data: Data, account: String) throws {
-        var query = baseQuery(account: account)
-        let attributes: [String: Any] = [kSecValueData as String: data]
-        let status = SecItemUpdate(query as CFDictionary, attributes as CFDictionary)
-        if status == errSecItemNotFound {
-            query[kSecValueData as String] = data
-            query[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
-            let addStatus = SecItemAdd(query as CFDictionary, nil)
-            guard addStatus == errSecSuccess else { throw KeychainError.unhandled(addStatus) }
-        } else if status != errSecSuccess {
-            throw KeychainError.unhandled(status)
-        }
-    }
-
-    private func data(account: String) throws -> Data? {
-        var query = baseQuery(account: account)
-        query[kSecReturnData as String] = true
-        query[kSecMatchLimit as String] = kSecMatchLimitOne
-        var result: AnyObject?
-        let status = SecItemCopyMatching(query as CFDictionary, &result)
-        switch status {
-        case errSecSuccess:
-            return result as? Data
-        case errSecItemNotFound:
-            return nil
-        default:
-            throw KeychainError.unhandled(status)
-        }
-    }
-
-    private func deleteData(account: String) throws {
-        let status = SecItemDelete(baseQuery(account: account) as CFDictionary)
-        switch status {
-        case errSecSuccess, errSecItemNotFound:
-            return
-        default:
-            throw KeychainError.unhandled(status)
-        }
     }
 }
