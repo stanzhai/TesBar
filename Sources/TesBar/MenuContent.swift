@@ -41,8 +41,10 @@ struct MenuContent: View {
             HStack {
                 Button("设置…") { showSettings = true }
                 Spacer()
-                Button("刷新") { Task { await services.store.refreshNow() } }
-                    .disabled(services.store.isLoading)
+                Button(services.store.isWaking ? "唤醒中…" : "刷新") {
+                    Task { await services.store.wakeAndRefresh() }
+                }
+                .disabled(services.store.isWaking)
                 Button("退出 TesBar") { NSApp.terminate(nil) }
             }
         }
@@ -120,10 +122,26 @@ struct StatusCard: View {
                 infoLine(snapshot)
                 if let pos = snapshot.position { mapCard(pos) }
                 else if snapshot.positionError != nil { positionErrorCard(snapshot.positionError!) }
-            } else if store.isLoading {
+                // 旧数据保留显示（方案 1）：车睡眠/离线但还有上次快照时，
+                // 不清数据，只提示数据是旧的 + 车辆状态。
+                if listState == "asleep" || listState == "offline" {
+                    let label = listState == "offline" ? "车辆离线" : "车辆睡眠中"
+                    if let updated = store.lastUpdated {
+                        Label(
+                            "\(label) · 数据为 \(StatusFormatting.updatedAgo(now.timeIntervalSince(updated)))",
+                            systemImage: "zzz"
+                        )
+                        .font(.caption2).foregroundStyle(.secondary)
+                    } else {
+                        Label(label, systemImage: "zzz")
+                            .font(.caption2).foregroundStyle(.secondary)
+                    }
+                }
+            } else if store.isLoading || store.isWaking {
                 HStack(spacing: 8) {
                     ProgressView().controlSize(.small)
-                    Text("正在获取车辆数据…").font(.callout).foregroundStyle(.secondary)
+                    Text(store.isWaking ? "正在唤醒车辆…" : "正在获取车辆数据…")
+                        .font(.callout).foregroundStyle(.secondary)
                 }
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 28)

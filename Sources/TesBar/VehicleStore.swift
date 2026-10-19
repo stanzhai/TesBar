@@ -44,6 +44,7 @@ public final class VehicleStore: @unchecked Sendable {
     private let clock: any PollClock
     private let defaults: UserDefaults
     private var pollTask: Task<Void, Never>?
+    private var loadTask: Task<Void, Never>?
 
     public init(
         client: any TeslaClient,
@@ -130,22 +131,56 @@ public final class VehicleStore: @unchecked Sendable {
     }
 
     /// ADR-0004：list state 非 `online` 不拉 vehicle_data（睡眠车取数会 408 并
-    /// 打断省电）；显示降级卡 + “唤醒”按钮。
-    private func load(_ id: String, force: Bool = false) async {
-        if !force {
-            guard isOnline(id) else {
-                snapshot = nil
-                return
+    /// 打断省电）。旧快照保留（方案 1）：UI 继续显示旧数据 + “数据为 X 前”角标，
+    /// 只有无任何数据时才显示降级卡。
+    private func load(_ id: String, force: Bool = false) {
+        guard force || isOnline(id) else { return } // 旧快照保留，不清
+        loadTask?.cancel()
+        loadTask = Task {
+            isLoading = true
+            defer { isLoading = false }
+            do {
+                let fresh = try await client.vehicleData(id: id)
+                guard !Task.isCancelled else { return }
+                snapshot = fresh
+                lastUpdated = await clock.now()
+                self.error = nil
+            } catch {
+                guard !Task.isCancelled else { return }
+                self.error = Self.describe(error)
             }
         }
-        isLoading = true
-        defer { isLoading = false }
+    }
+
+    /// 刷新按钮（新行为）：先拉 list，车不 online 就 wake 并轮询等 online
+    ///（最多 ~40s），然后拉数据。全程 isWaking=true 防重复点击。
+    public func wakeAndRefresh() async {
+        guard !isWaking, let id = selectedVehicleID else { return }
+        isWaking = true
+        defer { isWaking = false }
         do {
-            snapshot = try await client.vehicleData(id: id)
-            lastUpdated = await clock.now()
-            self.error = nil
+            vehicles = try await client.listVehicles()
+            guard let entry = vehicles.first(where: { $0.id == id }) else { return }
+            if !entry.state.isEmpty, entry.state != "online" {
+                try await client.wake(id: id)
+                // wake 后车要几秒到几十秒才 online；每 2s 查一次，最多 20 次（40s）。
+                for _ in 0..<20 {
+                    try await clock.sleep(for: 2)
+                    vehicles = try await client.listVehicles()
+                    if vehicles.first(where: { $0.id == id })?.state == "online" { break }
+                }
+            }
+            await refresh()
         } catch {
             self.error = Self.describe(error)
+        }
+    }
+
+    /// 测试钩子：等待内部 load 任务落定（load 现在异步启动）。
+    public func awaitPendingLoadsForTest() async {
+        while let t = loadTask, !t.isCancelled {
+            _ = await t.value
+            loadTask = nil
         }
     }
 

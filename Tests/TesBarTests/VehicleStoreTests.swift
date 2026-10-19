@@ -249,6 +249,7 @@ private func settle() async { try? await Task.sleep(nanoseconds: 50_000_000) }
     #expect(store.selectedVehicleID == "car1")
 
     await store.selectVehicle("car2")
+    await store.awaitPendingLoadsForTest()
     #expect(await client.dataCalls.last == "car2")
     #expect(defaults.string(forKey: "selectedVehicleID") == "car2")
 
