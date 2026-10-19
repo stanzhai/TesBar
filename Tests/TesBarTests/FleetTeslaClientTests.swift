@@ -199,16 +199,15 @@ struct FleetTeslaClientTests {
     ) throws -> (client: FleetTeslaClient, store: KeychainStore, suite: String) {
         let suite = "fleet-session-\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suite)!
-        let store = KeychainStore(service: service, privateKeyAccount: "fleet-vcp-key")
-        let keys = VCPKeyManager(store: store)
-        try keys.ensureKeyPair()
+        let store = KeychainStore(service: service)
+        EmbeddedTestKey.install()
         try store.saveToken("at1", for: AuthService.accessAccount)
         try? store.deleteToken(AuthService.refreshAccount)
         let auth = AuthService(clientID: "cid", clientSecret: "s", transport: transport, keychain: store)
         let client = FleetTeslaClient(
             transport: transport, auth: auth,
             resolver: RegionResolver(defaults: UserDefaults(suiteName: "fleet-resolver-\(UUID().uuidString)")!),
-            keys: keys, defaults: defaults)
+            keys: VCPKeyManager(), defaults: defaults)
         return (client, store, suite)
     }
 
@@ -257,7 +256,9 @@ struct FleetTeslaClientTests {
           "charge_state":{"battery_level":77,"battery_range":148.2,"charging_state":"Charging","minutes_to_full_charge":45},
           "climate_state":{"inside_temp":21.5,"outside_temp":8.0},
           "vehicle_state":{"locked":true,"ft":0,"rt":1,"odometer":7974.1},
-          "timestamp_ms":1760000000000}}
+          "drive_state":{"shift_state":"P","latitude":31.2304,"longitude":121.4737,
+            "native_latitude":31.2314,"native_longitude":121.4747,"native_type":"gcj"},
+          "timestamp":1760000000000}}
         """
         let transport = FleetScriptedTransport(vehicle: VehicleSim(), fleet: [.json(json)])
         let (client, _, _) = try makeClient(transport)
@@ -269,8 +270,38 @@ struct FleetTeslaClientTests {
         #expect(snap.climate.insideC == 21.5 && snap.climate.outsideC == 8.0)
         #expect(snap.doors.locked == true && !snap.doors.frontTrunkOpen && snap.doors.rearTrunkOpen)
         #expect(abs(snap.odometerKm - 7974.1 * 1.609344) < 0.1)
+        // GCJ native 坐标优先（Apple Maps 中国底图同坐标系，WGS 会偏 ~500m）。
+        #expect(snap.position?.latitude == 31.2314 && snap.position?.longitude == 121.4747)
         #expect(snap.state == .online && snap.timestampMs == 1_760_000_000_000)
-        #expect(transport.calls.first?.url.hasSuffix("/vehicle_data") == true)
+        let url = transport.calls.first?.url ?? ""
+        #expect(url.contains("/vehicle_data?") && url.contains("location_data"))
+    }
+
+    /// location_data 无 vehicle_location scope → 403 → 降级重发，仍取到数据。
+    @Test func vehicleDataFallsBackWhenLocationScopeMissing() async throws {
+        let fallbackJson = """
+        {"response":{"state":"online",
+          "charge_state":{"battery_level":50,"battery_range":150.0,"charging_state":"Disconnected"},
+          "climate_state":{"inside_temp":20.0,"outside_temp":15.0},
+          "vehicle_state":{"locked":true,"ft":0,"rt":0,"odometer":8000.0},
+          "drive_state":null,
+          "timestamp_ms":1760000000000}}
+        """
+        let transport = FleetScriptedTransport(vehicle: VehicleSim(), fleet: [
+            .error(status: 403, body: #"{"response":null,"error":"Unauthorized missing scopes vehicle_location"}"#),
+            .json(fallbackJson),
+        ])
+        let (client, _, _) = try makeClient(transport)
+
+        let snap = try await client.vehicleData(id: Self.vehicleID)
+        #expect(snap.charge.batteryPercent == 50)
+        #expect(snap.position == nil)
+        #expect(snap.positionError?.contains("vehicle_location") == true)
+        #expect(transport.calls.count == 2)
+        #expect(transport.calls[0].url.contains("location_data") == true)
+        #expect(transport.calls[1].url.contains("location_data") == false)
+        // 分号必须编码成 %3B：裸 ; 时 Tesla 只认第一个 endpoint（实测只回 drive_state）。
+        #expect(transport.calls.allSatisfy { !$0.url.contains(";") && $0.url.contains("%3B") })
     }
 
     @Test func asleepStateMapsFromVehicleState() async throws {
@@ -412,8 +443,8 @@ struct FleetTeslaClientTests {
         let client2 = FleetTeslaClient(
             transport: transport, auth: auth,
             resolver: RegionResolver(defaults: UserDefaults(suiteName: "fleet-resolver-\(UUID().uuidString)")!),
-            keys: VCPKeyManager(store: store), defaults: UserDefaults(suiteName: suite)!)
-            try await client2.signAndSend(command: .lock, vehicleID: Self.vehicleID)
+            keys: VCPKeyManager(), defaults: UserDefaults(suiteName: suite)!)
+        try await client2.signAndSend(command: .lock, vehicleID: Self.vehicleID)
 
         // handshake + command + (cold client) command: 3 posts, ONE handshake —
         // the persisted session (UserDefaults + keypair) survives the new instance.

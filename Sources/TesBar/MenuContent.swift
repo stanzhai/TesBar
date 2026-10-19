@@ -1,7 +1,9 @@
 import SwiftUI
+import MapKit
 
-/// 菜单主内容：状态卡 + 车辆切换 + 分组指令 + 状态行 + 设置/首启入口。
-/// 绑定 VehicleStore（06）/ CommandExecutor（07）/ DangerousCommandCoordinator（09）。
+/// 菜单主内容：状态卡（电量/续航/温度/里程/门锁一行式）+ 车辆切换 + 操作卡（空调/哨兵）+ 设置入口。
+/// 危险指令已移除（用户 2026-10 要求精简）；DangerousCommandCoordinator 仍在组合根，设置门禁保留。
+/// 睡眠车显示降级卡 + “唤醒”按钮（ADR-0004）。
 @available(macOS 14, *)
 struct MenuContent: View {
     let services: AppServices
@@ -20,14 +22,20 @@ struct MenuContent: View {
         services.client == nil || services.store.vehicles.isEmpty
     }
 
+    /// 选中车辆在 list 里的 state（ADR-0004：睡眠/离线显示降级 UI）。
+    private var selectedState: String {
+        services.store.vehicles
+            .first(where: { $0.id == services.store.selectedVehicleID })?.state ?? ""
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             if needsSetup {
                 SetupEntry(services: services)
             } else {
                 vehiclePicker
-                StatusCard(store: services.store, settings: settings)
-                CommandGroups(services: services)
+                StatusCard(store: services.store, settings: settings, listState: selectedState)
+                CommandCards(services: services, listState: selectedState)
             }
             statusLine
             HStack {
@@ -35,7 +43,7 @@ struct MenuContent: View {
                 Spacer()
                 Button("刷新") { Task { await services.store.refreshNow() } }
                     .disabled(services.store.isLoading)
-                Button("退出") { NSApp.terminate(nil) }
+                Button("退出 TesBar") { NSApp.terminate(nil) }
             }
         }
         .padding(12)
@@ -44,15 +52,25 @@ struct MenuContent: View {
     }
 
     private var vehiclePicker: some View {
-        Picker("车辆", selection: Binding(
-            get: { services.store.selectedVehicleID ?? "" },
-            set: { id in Task { await services.store.selectVehicle(id) } }
-        )) {
+        Menu {
             ForEach(services.store.vehicles, id: \.id) { vehicle in
-                Text(vehicle.name).tag(vehicle.id)
+                Button(vehicle.name) {
+                    Task { await services.store.selectVehicle(vehicle.id) }
+                }
             }
+        } label: {
+            HStack(spacing: 6) {
+                Image(systemName: "car.fill").font(.body).foregroundStyle(.secondary)
+                Text(services.store.vehicles.first(where: { $0.id == services.store.selectedVehicleID })?.name ?? "车辆")
+                    .font(.headline.weight(.semibold))
+                Image(systemName: "chevron.up.chevron.down")
+                    .font(.caption2.weight(.bold)).foregroundStyle(.tertiary)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .contentShape(Rectangle())
         }
-        .labelsHidden()
+        .menuStyle(.borderlessButton)
+        .fixedSize()
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
@@ -80,42 +98,41 @@ struct MenuContent: View {
     }
 }
 
-// MARK: - 状态卡（故事 8–15）
+// MARK: - 状态卡（故事 8–15；ADR-0004 加睡眠降级）
 
 @available(macOS 14, *)
 struct StatusCard: View {
     let store: VehicleStore
     @ObservedObject var settings: AppSettings
+    /// list 返回的选中车 state（"" = 未知，保守当在线）。
+    let listState: String
     @State private var now = Date()
 
+    private var isSleeping: Bool {
+        store.snapshot == nil && (listState == "asleep" || listState == "offline")
+    }
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
+        VStack(alignment: .leading, spacing: 10) {
             if let snapshot = store.snapshot {
-                HStack(alignment: .firstTextBaseline) {
-                    Text("\(snapshot.charge.batteryPercent)%")
-                        .font(.system(size: 28, weight: .bold))
-                    VStack(alignment: .leading) {
-                        Text("\(Int(snapshot.charge.rangeKm.rounded())) km").font(.title3)
-                        Text(chargingText(snapshot)).font(.caption).foregroundStyle(.secondary)
-                    }
-                    Spacer()
-                    stateBadge(snapshot.state)
-                }
-                Text(climateText(snapshot)).font(.caption).foregroundStyle(.secondary)
-                Text(StatusFormatting.doors(snapshot.doors)).font(.caption).foregroundStyle(.secondary)
-                HStack(spacing: 4) {
-                    Image(systemName: "gauge")
-                    Text("里程 \(Int(snapshot.odometerKm.rounded())) km")
-                    Spacer()
-                    Text(agoText)
-                }
-                .font(.caption2).foregroundStyle(.tertiary)
+                hero(snapshot)
+                batteryBar(snapshot)
+                infoLine(snapshot)
+                if let pos = snapshot.position { mapCard(pos) }
+                else if snapshot.positionError != nil { positionErrorCard(snapshot.positionError!) }
             } else if store.isLoading {
-                HStack(spacing: 6) { ProgressView().controlSize(.small); Text("加载中…").font(.callout) }
+                HStack(spacing: 8) {
+                    ProgressView().controlSize(.small)
+                    Text("正在获取车辆数据…").font(.callout).foregroundStyle(.secondary)
+                }
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 28)
+            } else if isSleeping {
+                sleepingCard
             } else {
-                Text(store.error ?? "暂无数据").font(.callout).foregroundStyle(.secondary)
+                emptyState
             }
-            if let error = store.error {
+            if let error = store.error, store.snapshot != nil {
                 Text(error).font(.caption2).foregroundStyle(.red)
             }
         }
@@ -128,166 +145,342 @@ struct StatusCard: View {
         }
     }
 
+    /// 睡眠/离线降级卡（ADR-0004）：不唤醒车，无详细数据；显式“唤醒”才取数。
+    private var sleepingCard: some View {
+        let offline = listState == "offline"
+        return VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Image(systemName: offline ? "antenna.radiowaves.left.and.right.slash" : "zzz")
+                    .font(.title2).foregroundStyle(.secondary)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(offline ? "车辆离线" : "睡眠中 · 省电模式").font(.headline)
+                    Text("电量、温度等详情需要唤醒车辆后才能获取。")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+                Spacer()
+            }
+            if offline {
+                Text("车辆不在线（无网络或长时间停放），唤醒可能失败。")
+                    .font(.caption2).foregroundStyle(.secondary)
+            }
+            Button {
+                Task { await store.wakeNow() }
+            } label: {
+                HStack(spacing: 6) {
+                    if store.isWaking { ProgressView().controlSize(.small) }
+                    Text(store.isWaking ? "正在唤醒…" : (offline ? "强制唤醒" : "唤醒车辆"))
+                }
+                .frame(maxWidth: .infinity)
+            }
+            .controlSize(.large)
+            .disabled(store.isWaking)
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(RoundedRectangle(cornerRadius: 10).fill(.quinary))
+    }
+
+    /// 主视觉：大号电量 + 续航 + 充电状态，右上角车辆状态徽标（已锁/行驶中…）。
+    private func hero(_ s: VehicleSnapshot) -> some View {
+        let charging = s.charge.state == "Charging"
+        return HStack(alignment: .top) {
+            VStack(alignment: .leading, spacing: 2) {
+                HStack(alignment: .firstTextBaseline, spacing: 2) {
+                    Text("\(s.charge.batteryPercent)")
+                        .font(.system(size: 38, weight: .heavy, design: .rounded))
+                        .monospacedDigit()
+                    Text("%")
+                        .font(.system(size: 17, weight: .semibold, design: .rounded))
+                        .foregroundStyle(.secondary)
+                }
+                HStack(alignment: .firstTextBaseline, spacing: 2) {
+                    Text("续航 ").font(.caption).foregroundStyle(.secondary)
+                    Text("\(Int(s.charge.rangeKm.rounded())) km")
+                        .monospacedDigit().fontWeight(.semibold)
+                        .font(.system(.subheadline, design: .rounded))
+                }
+                HStack(spacing: 4) {
+                    if charging { Image(systemName: "bolt.fill") }
+                    Text(chargingText(s))
+                }
+                .font(.footnote.weight(.medium))
+                .foregroundStyle(charging ? Color.green : Color.secondary)
+            }
+            Spacer()
+            statePill(s)
+        }
+    }
+
+    /// 电量条：充电/低电用色区分（<10% 红、<20% 橙、充电中绿）。
+    private func batteryBar(_ s: VehicleSnapshot) -> some View {
+        let charging = s.charge.state == "Charging"
+        let color: Color = charging ? .green
+            : s.charge.batteryPercent < 10 ? .red
+            : s.charge.batteryPercent < 20 ? .orange : .green
+        return GeometryReader { proxy in
+            ZStack(alignment: .leading) {
+                Capsule().fill(.quaternary)
+                Capsule().fill(color)
+                    .frame(width: max(6, proxy.size.width * Double(s.charge.batteryPercent) / 100))
+            }
+        }
+        .frame(height: 8)
+    }
+
+    /// 信息行（非卡片，紧贴电量条下方）：标签灰、数值高亮（rounded 粗体）。
+    private func infoLine(_ s: VehicleSnapshot) -> some View {
+        let f = settings.useFahrenheit
+        return HStack(spacing: 12) {
+            HStack(spacing: 4) {
+                Image(systemName: "thermometer.medium")
+                    .font(.caption2).foregroundStyle(.secondary)
+                valueText("车内\(StatusFormatting.temp(celsius: s.climate.insideC, fahrenheit: f) ?? "—")"
+                          + " 车外\(StatusFormatting.temp(celsius: s.climate.outsideC, fahrenheit: f) ?? "—")")
+            }
+            Spacer()
+            HStack(spacing: 4) {
+                Image(systemName: "gauge")
+                    .font(.caption2).foregroundStyle(.secondary)
+                valueText("总里程 \(Int(s.odometerKm.rounded())) km")
+            }
+        }
+        .font(.footnote)
+    }
+
+    /// 地图卡：MapKit 静态快照，车在中心；底部反向地理编码地址行（拿不到时退坐标）。
+    private func mapCard(_ pos: VehicleSnapshot.Position) -> some View {
+        let coord = CLLocationCoordinate2D(latitude: pos.latitude, longitude: pos.longitude)
+        return VStack(alignment: .leading, spacing: 4) {
+            Map(initialPosition: .region(MKCoordinateRegion(
+                center: coord,
+                span: MKCoordinateSpan(latitudeDelta: 0.01, longitudeDelta: 0.01)))) {
+                Marker("车辆", coordinate: coord)
+            }
+            .mapStyle(.standard)
+            .frame(height: 120)
+            .clipShape(RoundedRectangle(cornerRadius: 10))
+            HStack(spacing: 4) {
+                Image(systemName: "mappin.and.ellipse")
+                    .font(.caption2).foregroundStyle(.secondary)
+                LocationText(coord: coord)
+            }
+        }
+    }
+
+    /// 地址行：CLGeocoder 反查（系统服务，免费）；失败/超时退回坐标文本。
+    private struct LocationText: View {
+        let coord: CLLocationCoordinate2D
+        @State private var address: String?
+
+        var body: some View {
+            Text(address ?? String(format: "%.5f, %.5f", coord.latitude, coord.longitude))
+                .font(.caption2).foregroundStyle(.secondary)
+                .lineLimit(1)
+                .truncationMode(.middle)
+                .task {
+                    guard address == nil else { return }
+                    let placer = CLLocation(latitude: coord.latitude, longitude: coord.longitude)
+                    if let marks = try? await CLGeocoder().reverseGeocodeLocation(placer),
+                       let m = marks.first {
+                        // 中国区地址习惯：省 市 区 街道（subAdministrativeArea 常为空则跳过）。
+                        let parts = [m.administrativeArea, m.locality, m.subLocality, m.thoroughfare, m.name]
+                            .compactMap { $0 }.filter { !$0.isEmpty }
+                        // 相邻重复去重（直辖市 province==city）。
+                        var merged: [String] = []
+                        for p in parts where merged.last != p { merged.append(p) }
+                        address = merged.isEmpty ? nil : merged.prefix(4).joined()
+                    }
+                }
+        }
+    }
+
+    /// 位置获取失败异常卡：图标 + 详细原因。
+    private func positionErrorCard(_ reason: String) -> some View {
+        HStack(spacing: 8) {
+            Image(systemName: "location.slash")
+                .font(.title3)
+                .foregroundStyle(.orange)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("车辆位置获取失败").font(.footnote.weight(.semibold))
+                Text(reason).font(.caption).foregroundStyle(.secondary)
+            }
+            Spacer()
+        }
+        .padding(10)
+        .background(.orange.opacity(0.08), in: RoundedRectangle(cornerRadius: 10))
+    }
+
+    /// 数值高亮文本：按 CJK 边界切段，汉字段小灰、数字/单位段 rounded 粗体，顺序保留。
+    private func valueText(_ raw: String) -> Text {
+        var result: Text?
+        var segment = ""
+        var inCJK: Bool?
+        func flush() {
+            guard !segment.isEmpty else { return }
+            let part = inCJK == true
+                ? Text(segment).font(.caption2).foregroundStyle(.secondary)
+                : Text(segment).monospacedDigit().fontWeight(.semibold)
+                    .font(.system(.footnote, design: .rounded))
+            result = result.map { $0 + part } ?? part
+            segment = ""
+        }
+        for ch in raw {
+            let cjk = ch.unicodeScalars.allSatisfy { $0.properties.isIdeographic || $0.value == 0x2014 }
+            if cjk != inCJK { flush(); inCJK = cjk }
+            segment.append(ch)
+        }
+        flush()
+        return result ?? Text(raw)
+    }
+
+    private var emptyState: some View {
+        VStack(spacing: 10) {
+            Image(systemName: "car").font(.largeTitle).foregroundStyle(.tertiary)
+            Text(store.error ?? "暂无数据")
+                .font(.callout).foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+            Button("重新加载") { Task { await store.refreshNow() } }
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 20)
+    }
+
     private var agoText: String {
         guard let updated = store.lastUpdated else { return "" }
         return StatusFormatting.updatedAgo(now.timeIntervalSince(updated))
     }
 
-    @ViewBuilder private func stateBadge(_ state: VehicleSnapshot.State) -> some View {
-        // 离线是状态不是错误（故事 15）：灰字，不报红。
-        switch state {
-        case .online: Text("在线").font(.caption).foregroundStyle(.green)
-        case .asleep: Text("睡眠").font(.caption).foregroundStyle(.secondary)
-        case .offline: Text("离线").font(.caption).foregroundStyle(.secondary)
+    /// 车辆状态 + 更新时间（右上角，无背景）：行驶/已锁/未锁/箱门开 + N 分钟前。
+    private func statePill(_ s: VehicleSnapshot) -> some View {
+        let (text, icon, color): (String, String, Color) = {
+            if s.driving { return ("行驶中", "car.fill", .blue) }
+            if s.doors.frontTrunkOpen || s.doors.rearTrunkOpen {
+                return ("箱门开启", "shippingbox.fill", .orange)
+            }
+            switch s.doors.locked {
+            case .some(true): return ("已锁车", "lock.fill", .green)
+            case .some(false): return ("未锁车", "lock.open.fill", .orange)
+            case .none: return ("状态未知", "lock.slash", .gray)
+            }
+        }()
+        return VStack(alignment: .trailing, spacing: 3) {
+            HStack(spacing: 4) {
+                Image(systemName: icon)
+                Text(text)
+            }
+            .font(.caption.weight(.medium))
+            .foregroundStyle(color)
+            Text(agoText).font(.caption2).foregroundStyle(.tertiary)
         }
     }
 
     private func chargingText(_ s: VehicleSnapshot) -> String {
-        if s.charge.state == "Charging", let minutes = s.charge.minutesToFull {
-            return "充电中 · 约 \(minutes) 分钟充满"
+        if s.charge.state == "Charging" {
+            return s.charge.minutesToFull.map { "充电中 · 约 \($0) 分钟充满" } ?? "充电中"
         }
-        return s.charge.state
-    }
-
-    private func climateText(_ s: VehicleSnapshot) -> String {
-        let inside = StatusFormatting.temp(celsius: s.climate.insideC, fahrenheit: settings.useFahrenheit)
-        let outside = StatusFormatting.temp(celsius: s.climate.outsideC, fahrenheit: settings.useFahrenheit)
-        return "车内 \(inside ?? "—") · 车外 \(outside ?? "—")"
+        switch s.charge.state {
+        case "Complete": return "充电完成"
+        case "Disconnected": return "充电枪未连接"
+        case "Stopped": return "充电已停止"
+        default: return s.charge.state
+        }
     }
 }
 
-// MARK: - 分组指令（故事 18–26）
+// MARK: - 卡片式指令（ADR-0004：家庭 App 风格替代成对开/关按钮）
 
-@available(macOS 14, *)
-struct CommandGroups: View {
-    let services: AppServices
-
-    @State private var hvacTemp: Double = 21
-    @State private var chargeLimit: Double = 80
-    @State private var seatLevel: Double = 1
+/// 开关卡基元：图标 + 名称 + 状态副标题，tap 切换（发开或关指令）。
+private struct ToggleCard: View {
+    let icon: String
+    let title: String
+    let subtitle: String
+    let isOn: Bool?
+    let tint: Color
+    let action: () -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            GroupBox("空调") {
-                VStack(spacing: 4) {
-                    Stepper("温度 \(Int(hvacTemp))°C", value: $hvacTemp, in: 15...28)
-                    HStack {
-                        Button("开空调") { send(.hvacOn(temperatureC: hvacTemp)) }
-                        Button("关空调") { send(.hvacOff) }
-                    }
-                    HStack {
-                        Button("除霜") { send(.defrost(on: true)) }
-                        Button("停止除霜") { send(.defrost(on: false)) }
-                    }
-                    HStack {
-                        Stepper("座椅加热 L\(Int(seatLevel))", value: $seatLevel, in: 0...3)
-                        Button("设置") { send(.seatHeat(level: Int(seatLevel))) }
-                    }
+        Button(action: action) {
+            VStack(alignment: .leading, spacing: 6) {
+                Image(systemName: icon)
+                    .font(.title3)
+                    .foregroundStyle(isOn == true ? tint : .secondary)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(title).font(.callout.weight(.semibold))
+                    Text(subtitle).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
                 }
+                Spacer(minLength: 0)
             }
-            GroupBox("找车 / 安全") {
-                VStack(spacing: 4) {
-                    HStack {
-                        Button("鸣笛") { send(.horn) }
-                        Button("闪灯") { send(.flashLights) }
-                        Button("哨兵开") { send(.sentry(on: true)) }
-                        Button("哨兵关") { send(.sentry(on: false)) }
-                    }
-                }
-            }
-            GroupBox("充电") {
-                VStack(spacing: 4) {
-                    HStack {
-                        Button("开充电口") { send(.chargePort(open: true)) }
-                        Button("关充电口") { send(.chargePort(open: false)) }
-                        Button("开始充电") { send(.startCharge) }
-                        Button("停止充电") { send(.stopCharge) }
-                    }
-                    HStack {
-                        Stepper("限值 \(Int(chargeLimit))%", value: $chargeLimit, in: 50...100, step: 5)
-                        Button("设置") { send(.setChargeLimit(percent: Int(chargeLimit))) }
-                    }
-                }
-            }
-            GroupBox("危险指令 · 长按 1 秒") {
-                VStack(spacing: 4) {
-                    HStack {
-                        DangerButton("解锁", command: .unlock, coordinator: services.coordinator)
-                        DangerButton("锁车", command: .lock, coordinator: services.coordinator)
-                        DangerButton("远程启动", command: .remoteStart, coordinator: services.coordinator)
-                    }
-                    HStack {
-                        DangerButton("开后备箱", command: .doorOpen(.trunk), coordinator: services.coordinator)
-                        DangerButton("关后备箱", command: .doorClose(.trunk), coordinator: services.coordinator)
-                        DangerButton("开前备箱", command: .doorOpen(.frunk), coordinator: services.coordinator)
-                        DangerButton("关前备箱", command: .doorClose(.frunk), coordinator: services.coordinator)
-                    }
-                    // 车门本身不支持远程开闭（research §5）；门的开闭状态见上方状态卡。
-                }
-            }
+            .frame(maxWidth: .infinity, minHeight: 64, alignment: .leading)
+            .padding(10)
+            .background(
+                RoundedRectangle(cornerRadius: 10)
+                    .fill(isOn == true ? AnyShapeStyle(tint.opacity(0.15)) : AnyShapeStyle(.quinary))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 10)
+                    .strokeBorder(isOn == true ? tint.opacity(0.5) : .clear, lineWidth: 1)
+            )
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+@available(macOS 14, *)
+struct CommandCards: View {
+    let services: AppServices
+    /// 选中车 list state：睡眠时卡片状态未知（发令仍可，executor 自动唤醒）。
+    let listState: String
+
+    @State private var hvacTemp: Double = 21
+
+    private var sleeping: Bool { listState == "asleep" || listState == "offline" }
+    var body: some View {
+        cardGrid {
+            ToggleCard(
+                icon: "fanblades.fill",
+                title: "空调",
+                subtitle: hvacSubtitle,
+                isOn: hvacOn,
+                tint: .orange
+            ) { send(hvacOn == true ? .hvacOff : .hvacOn(temperatureC: hvacTemp)) }
+
+            ToggleCard(
+                icon: "eye.fill",
+                title: "哨兵",
+                subtitle: sentrySubtitle,
+                isOn: sentryOn,
+                tint: .teal
+            ) { send(.sentry(on: !(sentryOn ?? false))) }
         }
     }
+
+    private func cardGrid<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {
+        let cards = content()
+        return LazyVGrid(columns: [GridItem(.flexible(), spacing: 8), GridItem(.flexible(), spacing: 8)], spacing: 8) {
+            cards
+        }
+    }
+
+    // MARK: 快照驱动的卡片状态（睡眠时为 nil → 副标题“需唤醒”，tap 仍可发令）
+
+    private var snapshot: VehicleSnapshot? { services.store.snapshot }
+
+    private var hvacOn: Bool? {
+        // VehicleSnapshot 未透出 hvac_on（mapper 无该字段）。
+        // ponytail: mapper 补该字段后改真值；当前卡片显示为未激活样式。
+        nil
+    }
+
+    private var hvacSubtitle: String {
+        sleeping ? "需唤醒 · \(Int(hvacTemp))°C" : "设定 \(Int(hvacTemp))°C"
+    }
+
+    private var sentryOn: Bool? { nil }
+    private var sentrySubtitle: String { sleeping ? "需唤醒" : "点击切换" }
 
     /// 非危险指令直发 executor（无长按/门禁）。
     private func send(_ command: VehicleCommand) {
         guard let id = services.store.selectedVehicleID else { return }
         Task { await services.executor.execute(command, vehicleID: id) }
-    }
-}
-
-/// 危险指令按钮：按下/松手驱动 coordinator，50ms tick 喂 ConfirmGate；
-/// 进度条读 coordinator.confirmGate.state（长按达 1s 发令，门禁开启时叠加认证）。
-@available(macOS 14, *)
-struct DangerButton: View {
-    let title: String
-    let command: VehicleCommand
-    @ObservedObject var coordinator: DangerousCommandCoordinator
-
-    @State private var pressing = false
-    @State private var timer: Timer?
-
-    init(_ title: String, command: VehicleCommand, coordinator: DangerousCommandCoordinator) {
-        self.title = title
-        self.command = command
-        self.coordinator = coordinator
-    }
-
-    var body: some View {
-        let progress: Double
-        if case .pressing(let p) = coordinator.confirmGate.state { progress = p } else { progress = 0 }
-
-        return Button(action: {}) {
-            Text(title)
-                .frame(maxWidth: .infinity)
-                .background(
-                    GeometryReader { proxy in
-                        RoundedRectangle(cornerRadius: 4)
-                            .fill(Color.accentColor.opacity(0.35))
-                            .frame(width: proxy.size.width * min(progress, 1))
-                    }
-                    .allowsHitTesting(false)
-                )
-        }
-        .gesture(
-            DragGesture(minimumDistance: 0)
-                .onChanged { _ in
-                    guard !pressing else { return }
-                    pressing = true
-                    Task { await coordinator.beginPress(command) }
-                    timer = Timer.scheduledTimer(withTimeInterval: 0.05, repeats: true) { _ in
-                        Task { @MainActor in await coordinator.tick(Date()) }
-                    }
-                }
-                .onEnded { _ in
-                    stopTimer()
-                    coordinator.endPress()
-                    pressing = false
-                }
-        )
-    }
-
-    private func stopTimer() {
-        timer?.invalidate()
-        timer = nil
     }
 }

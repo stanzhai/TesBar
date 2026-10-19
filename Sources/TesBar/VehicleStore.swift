@@ -19,7 +19,7 @@ public struct SystemPollClock: PollClock {
     }
 }
 
-/// Polling state machine (ADR-0001, settled): fetch on menu open; 60 s while
+
 /// charging; 15 min otherwise and only while the vehicle is online; never wake
 /// a sleeping car just to refresh data. Offline is a state, not an error.
 @available(macOS 14, *)
@@ -33,6 +33,8 @@ public final class VehicleStore: @unchecked Sendable {
     public private(set) var lastUpdated: Date?
     /// Last fetch failure. An unreachable car surfaces as `snapshot.state == .offline`, not here (user story 15).
     public private(set) var error: String?
+    /// 显式唤醒进行中（“唤醒”按钮转圈）。
+    public private(set) var isWaking = false
 
     private static let chargingInterval: TimeInterval = 60
     private static let idleInterval: TimeInterval = 15 * 60
@@ -54,7 +56,18 @@ public final class VehicleStore: @unchecked Sendable {
         selectedVehicleID = defaults.string(forKey: Self.selectedIDKey)
     }
 
-    /// Menu just opened: fetch fresh data unconditionally (user story 7).
+    /// 退出登录（ADR-0004）：清列表/快照/错误。轮询不停（空转无害），
+    /// 重登后 menuOpened/轮询自动恢复取数。
+    public func clearForSignOut() {
+        vehicles = []
+        snapshot = nil
+        selectedVehicleID = nil
+        defaults.removeObject(forKey: Self.selectedIDKey)
+        lastUpdated = nil
+        error = nil
+    }
+
+    /// Menu just opened: fetch list; only an `online` car gets vehicle_data (ADR-0004).
     public func menuOpened() async {
         await refresh()
     }
@@ -64,6 +77,20 @@ public final class VehicleStore: @unchecked Sendable {
         await refresh()
     }
 
+    /// 显式唤醒（ADR-0004）：用户点了“唤醒”才唤醒。发指令仍由
+    /// CommandExecutor.ensureAwake 自动唤醒（ADR-0001 不变）。
+    public func wakeNow() async {
+        guard let id = selectedVehicleID else { return }
+        isWaking = true
+        defer { isWaking = false }
+        do {
+            try await client.wake(id: id)
+            await load(id, force: true)
+        } catch {
+            self.error = Self.describe(error)
+        }
+    }
+
     /// Switch the displayed vehicle and remember it as the default (user stories 16/17).
     public func selectVehicle(_ id: String) async {
         guard id != selectedVehicleID else { return }
@@ -71,7 +98,7 @@ public final class VehicleStore: @unchecked Sendable {
         defaults.set(id, forKey: Self.selectedIDKey)
         snapshot = nil
         lastUpdated = nil
-        await load(id)
+        await refresh()
     }
 
     public func startPolling() {
@@ -102,7 +129,15 @@ public final class VehicleStore: @unchecked Sendable {
         }
     }
 
-    private func load(_ id: String) async {
+    /// ADR-0004：list state 非 `online` 不拉 vehicle_data（睡眠车取数会 408 并
+    /// 打断省电）；显示降级卡 + “唤醒”按钮。
+    private func load(_ id: String, force: Bool = false) async {
+        if !force {
+            guard isOnline(id) else {
+                snapshot = nil
+                return
+            }
+        }
         isLoading = true
         defer { isLoading = false }
         do {
@@ -114,6 +149,12 @@ public final class VehicleStore: @unchecked Sendable {
         }
     }
 
+    /// list state == online（旧数据/测试数据无 state 时保守视为在线，保持旧行为）。
+    private func isOnline(_ id: String) -> Bool {
+        guard let entry = vehicles.first(where: { $0.id == id }) else { return false }
+        return entry.state.isEmpty || entry.state == "online"
+    }
+
     private func pollLoop() async {
         while !Task.isCancelled {
             let charging = snapshot?.charge.state == "Charging"
@@ -123,7 +164,8 @@ public final class VehicleStore: @unchecked Sendable {
                 return // stopPolling()
             }
             // Only poll an online car; never wake a sleeping one for data (ADR-0001).
-            guard let id = selectedVehicleID, snapshot?.state == .online else { continue }
+            // 退出登录后 selectedVehicleID == nil → 空转一轮；重登自动恢复取数。
+            guard let id = selectedVehicleID, isOnline(id) else { continue }
             await load(id)
         }
     }

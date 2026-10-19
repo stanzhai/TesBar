@@ -13,20 +13,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 @available(macOS 14, *)
 @MainActor
 final class AppSettings: ObservableObject {
-    static let clientIDKey = SetupWizard.clientIDKey
-    static let clientSecretAccount = SetupWizard.clientSecretAccount
     static let tempUnitKey = "temperatureUnitFahrenheit"
     static let gateKey = "biometricGateEnabled"
-    private let keychain = KeychainStore()
 
-
-    @Published var clientID: String {
-        didSet { UserDefaults.standard.set(clientID, forKey: Self.clientIDKey) }
-    }
-    /// client secret 只存 Keychain（user story 35）。
-    @Published var clientSecret: String {
-        didSet { try? keychain.saveToken(clientSecret, for: Self.clientSecretAccount) }
-    }
     /// true = °F。
     @Published var useFahrenheit: Bool {
         didSet { UserDefaults.standard.set(useFahrenheit, forKey: Self.tempUnitKey) }
@@ -45,8 +34,6 @@ final class AppSettings: ObservableObject {
 
     init() {
         let d = UserDefaults.standard
-        clientID = d.string(forKey: Self.clientIDKey) ?? ""
-        clientSecret = (try? keychain.readToken(Self.clientSecretAccount)) ?? ""
         useFahrenheit = d.bool(forKey: Self.tempUnitKey)
         biometricGateEnabled = d.bool(forKey: Self.gateKey)
         launchAtLogin = d.bool(forKey: "launchAtLogin")

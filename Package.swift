@@ -5,7 +5,9 @@ let package = Package(
     name: "TesBar",
     platforms: [.macOS(.v13)],
     targets: [
-        .executableTarget(name: "TesBar"),
+        .executableTarget(name: "TesBar", resources: [
+            .process("Resources"),
+        ]),
         .testTarget(name: "TesBarTests", dependencies: ["TesBar"]),
     ]
 )

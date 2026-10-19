@@ -3,10 +3,6 @@ import Testing
 
 @testable import TesBar
 
-/// ticket 10：SetupWizard 状态机 + 持久化 + 配对 URL + 完成标记。
-/// UI 不测（编译即验收）；SetupWizard 依赖注入 defaults/keychain/auth/client，全在此脚本化。
-/// `@Test` 与 `@available` 不能同置一函数（同 06），故测试为带标注的自由函数。
-
 /// 独立 defaults（suite 删除清理），与 06 的 isolatedDefaults 同法。
 private func isolatedDefaults() -> UserDefaults {
     let suite = "SetupWizardTests-\(UUID().uuidString)"
@@ -36,7 +32,7 @@ private func makeWizard(
     return SetupWizard(
         defaults: defaults ?? isolatedDefaults(),
         keychain: keychain,
-        keys: VCPKeyManager(store: keychain),
+        keys: VCPKeyManager(),
         clientFactory: { _ in WizardFakeClient(vehicles: vehicles, listError: listError) }
     )
 }
@@ -45,76 +41,40 @@ private func makeWizard(
 
 @available(macOS 14, *) @Test func stepFlowAdvancesSkipsAndBacks() {
     var flow = SetupStepFlow()
-    #expect(flow.step == .credentials)
-    flow.next()
     #expect(flow.step == .login)
+    flow.next()
+    #expect(flow.step == .pair)
     flow.back()
-    #expect(flow.step == .credentials)
-    flow.next(); flow.next(); flow.next(); flow.next()
+    #expect(flow.step == .login)
+    flow.next(); flow.next()
     #expect(flow.step == .done)
     flow.next()  // done 停住
     #expect(flow.step == .done)
 }
 
-@available(macOS 14, *) @Test func credentialsStepCannotGoBack() {
+@available(macOS 14, *) @Test func loginStepCannotGoBack() {
     var flow = SetupStepFlow()
     flow.back()
-    #expect(flow.step == .credentials)
+    #expect(flow.step == .login)
 }
 
-@available(macOS 14, *) @Test func resumingPicksStartStepFromState() {
-    #expect(SetupStepFlow.resuming(hasCredentials: true, isLoggedIn: true).step == .keyPair)
-    #expect(SetupStepFlow.resuming(hasCredentials: true, isLoggedIn: false).step == .login)
-    #expect(SetupStepFlow.resuming(hasCredentials: false, isLoggedIn: false).step == .credentials)
+@available(macOS 14, *) @Test func resumingPicksStartStepFromLoginState() {
+    #expect(SetupStepFlow.resuming(isLoggedIn: true).step == .pair)
+    #expect(SetupStepFlow.resuming(isLoggedIn: false).step == .login)
 }
 
-@available(macOS 14, *) @MainActor @Test func freshWizardWithLoginResumesAtKeyPair() {
+@available(macOS 14, *) @MainActor @Test func loggedInWizardResumesAtPair() {
     let wizard = makeWizard(loggedIn: true)
-    #expect(wizard.flow.step == .keyPair)
+    #expect(wizard.flow.step == .pair)
     #expect(wizard.isLoggedIn)
 }
 
-// MARK: - 凭据持久化 / 加载
-
-@available(macOS 14, *) @MainActor @Test func saveCredentialsPersistsIDToDefaultsAndSecretToKeychain() {
-    let defaults = isolatedDefaults()
-    let keychain = isolatedKeychain()
-    let wizard = makeWizard(defaults: defaults, keychain: keychain)
-    wizard.clientID = "cid-1"
-    wizard.clientSecret = "sekret"
-    wizard.saveCredentials()
-    #expect(wizard.flow.step == .login)
-    #expect(defaults.string(forKey: SetupWizard.clientIDKey) == "cid-1")
-    #expect((try? keychain.readToken(SetupWizard.clientSecretAccount)) == "sekret")
-}
-
-@available(macOS 14, *) @MainActor @Test func emptyCredentialsRejectedWithoutAdvancing() {
-    let wizard = makeWizard()
-    wizard.clientID = "  "
-    wizard.clientSecret = ""
-    wizard.saveCredentials()
-    #expect(wizard.flow.step == .credentials)
-    #expect(wizard.error != nil)
-}
-
-@available(macOS 14, *) @MainActor @Test func restoreLoadsSavedCredentialsAndDomain() {
-    let defaults = isolatedDefaults()
-    let keychain = isolatedKeychain()
-    defaults.set("cid-2", forKey: SetupWizard.clientIDKey)
-    defaults.set("example.com", forKey: SetupWizard.domainKey)
-    try? keychain.saveToken("saved-secret", for: SetupWizard.clientSecretAccount)
-    let wizard = makeWizard(defaults: defaults, keychain: keychain)
-    #expect(wizard.clientID == "cid-2")
-    #expect(wizard.clientSecret == "saved-secret")
-    #expect(wizard.flow.step == .login)  // 凭据已存未登录 → 续认证从登录步开始
-}
-
-// MARK: - 配对 URL
+// MARK: - 配对 URL（内置域名）
 
 @available(macOS 14, *) @Test func pairingURLConstruction() {
-    #expect(SetupWizard.pairingURL(domain: "example.com")?.absoluteString == "https://tesla.com/_ak/example.com")
-    #expect(SetupWizard.pairingURL(domain: "  example.com  ")?.absoluteString == "https://tesla.com/_ak/example.com")
-    #expect(SetupWizard.pairingURL(domain: "a b.com")?.absoluteString == "https://tesla.com/_ak/a%20b.com")
+    #expect(SetupWizard.pairingURL(domain: "example.com")?.absoluteString == "https://tesla.cn/_ak/example.com")
+    #expect(SetupWizard.pairingURL(domain: "  example.com  ")?.absoluteString == "https://tesla.cn/_ak/example.com")
+    #expect(SetupWizard.pairingURL(domain: "a b.com")?.absoluteString == "https://tesla.cn/_ak/a%20b.com")
     #expect(SetupWizard.pairingURL(domain: "") == nil)
     #expect(SetupWizard.pairingURL(domain: "   ") == nil)
 }
@@ -125,8 +85,8 @@ private func makeWizard(
     let defaults = isolatedDefaults()
     let wizard = makeWizard(defaults: defaults)
     #expect(!wizard.isComplete)
-    wizard.skip(); wizard.skip(); wizard.skip()  // credentials → login → keyPair → verify
-    #expect(wizard.flow.step == .verify)
+    wizard.skip()  // login → pair
+    #expect(wizard.flow.step == .pair)
     #expect(!wizard.isComplete)
     wizard.complete()
     #expect(wizard.flow.step == .done)
@@ -137,26 +97,26 @@ private func makeWizard(
 @available(macOS 14, *) @MainActor @Test func skipWalksAllTheWayToDone() {
     let defaults = isolatedDefaults()
     let wizard = makeWizard(defaults: defaults)
-    for _ in 0..<4 { wizard.skip() }
+    for _ in 0..<2 { wizard.skip() }
     #expect(wizard.flow.step == .done)
     #expect(wizard.isComplete)
 }
 
-@available(macOS 14, *) @MainActor @Test func completeOnlyWorksFromVerify() {
+@available(macOS 14, *) @MainActor @Test func completeOnlyWorksFromPair() {
     let defaults = isolatedDefaults()
     let wizard = makeWizard(defaults: defaults)
-    wizard.complete()  // 仍在 credentials
-    #expect(wizard.flow.step == .credentials)
+    wizard.complete()  // 仍在 login
+    #expect(wizard.flow.step == .login)
     #expect(!wizard.isComplete)
 }
 
-// MARK: - 验证步
+// MARK: - 配对步验证
 
 @available(macOS 14, *) @MainActor @Test func verifyListsVehicles() async {
     let wizard = makeWizard(vehicles: [
         VehicleListEntry(id: "1", name: "Alpha"), VehicleListEntry(id: "2", name: "Beta")
     ])
-    for _ in 0..<2 { wizard.skip() }  // → keyPair → verify
+    wizard.skip()  // → pair
     await wizard.verify()
     #expect(wizard.vehicles.map(\.name) == ["Alpha", "Beta"])
     #expect(wizard.error == nil)
@@ -164,33 +124,17 @@ private func makeWizard(
 
 @available(macOS 14, *) @MainActor @Test func verifyErrorSurfacesWithoutCompleting() async {
     let wizard = makeWizard(listError: URLError(.notConnectedToInternet))
-    for _ in 0..<2 { wizard.skip() }
+    wizard.skip()
     await wizard.verify()
     #expect(wizard.vehicles.isEmpty)
     #expect(wizard.error != nil)
     #expect(!wizard.isComplete)
 }
 
-// MARK: - 登录态与重看公钥
-
-@available(macOS 14, *) @MainActor @Test func keyPairStepExposesPublicKeyAndDomainPersists() throws {
-    let defaults = isolatedDefaults()
-    let keychain = isolatedKeychain()
-    let wizard = makeWizard(defaults: defaults, keychain: keychain)
-    for _ in 0..<2 { wizard.skip() }
-    #expect(wizard.flow.step == .keyPair)
-    wizard.prepareKeyPair()
-    let pem = try #require(wizard.publicKeyPEM)
-    #expect(pem.hasPrefix("-----BEGIN PUBLIC KEY-----"))
-    wizard.domain = "example.com"
-    wizard.saveDomain()
-    #expect(defaults.string(forKey: SetupWizard.domainKey) == "example.com")
-}
-
 @available(macOS 14, *) @Test func authErrorsMapToGuidance() {
     #expect(SetupWizard.guidanceMessage(AuthError.reauthRequired).contains("重新登录"))
     #expect(SetupWizard.guidanceMessage(AuthError.refreshTokenInvalid).contains("重新登录"))
-    // Bad client_id/secret must point at the credentials step, not "re-login".
+    // Bad client_id/secret 指向构建注入的凭据，不是"重登"。
     let msg = SetupWizard.guidanceMessage(AuthError.clientCredentialsRejected("combo invalid"))
     #expect(msg.contains("client_id"))
     #expect(msg.contains("combo invalid"))
@@ -207,8 +151,13 @@ private struct WizardFakeClient: TeslaClient {
         return vehicles
     }
 
-    func vehicleData(id: String) async throws -> VehicleSnapshot { ScriptedTeslaClient.snapshot(state: .online) }
+    func vehicleData(id: String) async throws -> VehicleSnapshot {
+        ScriptedTeslaClient.snapshot(state: .online)
+    }
+
     func wake(id: String) async throws {}
+
     func signAndSend(command: VehicleCommand, vehicleID: String) async throws {}
+
     func refreshAccessToken() async throws {}
 }

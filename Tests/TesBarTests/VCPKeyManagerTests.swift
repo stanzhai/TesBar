@@ -4,76 +4,64 @@ import Testing
 
 @testable import TesBar
 
-/// 真 Keychain 集成测试（ticket 03/02 记载的例外）。
-/// 每个用例用 UUID service/account 隔离，defer 清理，保证重跑全绿。
+/// VCPKeyManager 现为共享内置密钥（ADR-0004）：不再生成/存储，只从
+/// ``BuildConfig`` 私钥 PEM 重建 SecKey 并推导公钥。单测用临时 PEM 走
+/// `secKey(fromPrivatePEM:)` / `publicPEM(fromPrivatePEM:)` 这些纯函数路径。
 struct VCPKeyManagerTests {
-    private func makeManager() -> (VCPKeyManager, KeychainStore) {
-        let run = UUID().uuidString
-        let store = KeychainStore(service: "com.tesbar.test.\(run)", privateKeyAccount: "vcp-\(run)")
-        return (VCPKeyManager(store: store), store)
-    }
-
-    @Test func firstCallGeneratesSecondCallSamePEM() throws {
-        let (mgr, store) = makeManager()
-        defer { try? store.deletePrivateKey() }
-
-        let first = try mgr.ensureKeyPair()
-        #expect(first.hasPrefix("-----BEGIN PUBLIC KEY-----"))
-        #expect(first.contains("-----END PUBLIC KEY-----"))
-
-        let second = try mgr.ensureKeyPair()
-        #expect(second == first)
-    }
-
-    @Test func storedPrivateKeyPEMIsSEC1() throws {
-        let (mgr, store) = makeManager()
-        defer { try? store.deletePrivateKey() }
-
-        _ = try mgr.ensureKeyPair()
-        let pem = String(decoding: try store.readPrivateKey(), as: UTF8.self)
-        #expect(pem.hasPrefix("-----BEGIN EC PRIVATE KEY-----"))
-        #expect(pem.contains("-----END EC PRIVATE KEY-----"))
-    }
-
-    @Test func loadPrivateKeyRebuildsAndDerivesSamePublicKey() throws {
-        let (mgr, store) = makeManager()
-        defer { try? store.deletePrivateKey() }
-
-        let pubPEM = try mgr.ensureKeyPair()
-        let priv = try mgr.loadPrivateKey()
-        let rebuilt = mgr.publicPEM(SecKeyCopyPublicKey(priv)!)
-        #expect(rebuilt == pubPEM)
-    }
-
-    @Test func publicPEMRebuildsViaSecKeyCreateWithData() throws {
-        let (mgr, store) = makeManager()
-        defer { try? store.deletePrivateKey() }
-
-        let pubPEM = try mgr.ensureKeyPair()
-        let pub = try mgr.secKey(fromPublicPEM: pubPEM)
-        #expect(mgr.publicPEM(pub) == pubPEM)
-    }
-
-    @Test func privatePEMRoundTripsFreshKey() throws {
-        // 不依赖 Keychain：生成 → PEM → 重建 → 公钥一致。
-        let (mgr, _) = makeManager()
+    /// 每个用例生成一把临时 P-256 密钥当作“构建注入私钥”。
+    private func makePEM() throws -> (pem: String, priv: SecKey) {
         var err: Unmanaged<CFError>?
         let priv = SecKeyCreateRandomKey([
             kSecAttrKeyType as String: kSecAttrKeyTypeECSECPrimeRandom,
             kSecAttrKeySizeInBits as String: 256,
         ] as CFDictionary, &err)!
-        let pem = mgr.privatePEM(priv)
+        let mgr = VCPKeyManager()
+        let pem = try {
+            // SEC1 包装：raw 外表示 point65||scalar32 → 手工 DER（同实现路径的反向）。
+            let raw = SecKeyCopyExternalRepresentation(priv, nil)! as Data
+            func tlv(_ tag: UInt8, _ content: Data) -> Data {
+                [tag] + [UInt8(content.count)] + content
+            }
+            let p256OID = Data([0x2A, 0x86, 0x48, 0xCE, 0x3D, 0x03, 0x01, 0x07])
+            let sec1 = [tlv(0x02, Data([1])),
+                        tlv(0x04, raw.suffix(32)),
+                        tlv(0xA0, tlv(0x06, p256OID)),
+                        tlv(0xA1, tlv(0x03, Data([0x00]) + raw.prefix(65)))]
+                .reduce(into: Data(), +=)
+            let der = tlv(0x30, sec1)
+            let b64 = der.base64EncodedString()
+            var out = "-----BEGIN EC PRIVATE KEY-----\n"
+            var start = b64.startIndex
+            while start < b64.endIndex {
+                let end = b64.index(start, offsetBy: 64, limitedBy: b64.endIndex) ?? b64.endIndex
+                out += b64[start..<end] + "\n"
+                start = end
+            }
+            return out + "-----END EC PRIVATE KEY-----\n"
+        }()
+        return (pem, priv)
+    }
+
+    @Test func secKeyFromPrivatePEMRebuildsAndDerivesSamePublicKey() throws {
+        let (pem, priv) = try makePEM()
+        let mgr = VCPKeyManager()
         let rebuilt = try mgr.secKey(fromPrivatePEM: pem)
         #expect(mgr.publicPEM(SecKeyCopyPublicKey(rebuilt)!) ==
                 mgr.publicPEM(SecKeyCopyPublicKey(priv)!))
     }
 
-    @Test func keysAreP256() throws {
-        let (mgr, store) = makeManager()
-        defer { try? store.deletePrivateKey() }
+    @Test func publicPEMRebuildsViaSecKeyCreateWithData() throws {
+        let (pem, _) = try makePEM()
+        let mgr = VCPKeyManager()
+        let pubPEM = try mgr.publicPEM(fromPrivatePEM: pem)
+        let pub = try mgr.secKey(fromPublicPEM: pubPEM)
+        #expect(mgr.publicPEM(pub) == pubPEM)
+    }
 
-        _ = try mgr.ensureKeyPair()
-        let priv = try mgr.loadPrivateKey()
+    @Test func keysAreP256() throws {
+        let (pem, _) = try makePEM()
+        let mgr = VCPKeyManager()
+        let priv = try mgr.secKey(fromPrivatePEM: pem)
         let pub = SecKeyCopyPublicKey(priv)!
         let attrs = SecKeyCopyAttributes(pub) as! [String: Any]
         #expect(attrs[kSecAttrKeyType as String] as? Int == kSecAttrKeyTypeECSECPrimeRandom as? Int)
@@ -82,19 +70,18 @@ struct VCPKeyManagerTests {
         #expect((SecKeyCopyExternalRepresentation(priv, nil)! as Data).count == 97)
     }
 
-    @Test func malformedStoredPEMThrows() {
-        let (mgr, store) = makeManager()
-        defer { try? store.deletePrivateKey() }
-        try? store.savePrivateKey(Data("garbage".utf8))
+    @Test func malformedPEMThrows() {
+        let mgr = VCPKeyManager()
         #expect(throws: VCPKeyManager.KeyError.malformedStoredKey) {
-            _ = try mgr.loadPrivateKey()
+            _ = try mgr.secKey(fromPrivatePEM: "garbage")
         }
     }
 
-    @Test func independentManagersDoNotShareKeys() throws {
-        let (a, sa) = makeManager()
-        let (b, sb) = makeManager()
-        defer { try? sa.deletePrivateKey(); try? sb.deletePrivateKey() }
-        #expect(try a.ensureKeyPair() != b.ensureKeyPair())
+    /// ADR-0004 的行为锚点：同一私钥 PEM（共享分发）处处推导同一公钥。
+    @Test func samePEMDerivesSamePublicKeyEverywhere() throws {
+        let (pem, _) = try makePEM()
+        let a = VCPKeyManager()
+        let b = VCPKeyManager()
+        #expect(try a.publicPEM(fromPrivatePEM: pem) == b.publicPEM(fromPrivatePEM: pem))
     }
 }

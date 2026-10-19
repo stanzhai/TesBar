@@ -17,11 +17,6 @@ struct KeychainStoreTests {
         try store.saveToken("token-\(run)", for: "access-\(run)")
         #expect(try store.readToken("access-\(run)") == "token-\(run)")
         defer { try? store.deleteToken("access-\(run)") }
-
-        try store.savePrivateKey(Data("pem-\(run)".utf8))
-        #expect(try store.readPrivateKey() == Data("pem-\(run)".utf8))
-        try store.deletePrivateKey()
-        #expect(throws: KeychainError.itemNotFound) { try store.readPrivateKey() }
     }
 
     @Test func deleteThenReadFails() throws {

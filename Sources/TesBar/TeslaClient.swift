@@ -17,22 +17,27 @@ public struct VehicleListEntry: Sendable, Equatable, Codable {
     public let name: String
     /// 17-char VIN — signed_command is VIN-keyed (ticket 05).
     public let vin: String
+    /// Fleet API list state: `online` / `asleep` / `offline`（ADR-0004：睡眠车默认
+    /// 不取 vehicle_data，state 决定 UI 是否显示降级卡）。
+    public let state: String
 
-    /// Old persisted/test JSON without `vin` decodes with an empty string (union-merge safety);
-    /// real Fleet API `GET /api/1/vehicles` responses always carry one.
-    public init(id: String, name: String, vin: String = "") {
+    /// 旧持久化/测试 JSON 缺 `vin`/`state` 时按空串解码（union-merge 安全）；
+    /// 真实 Fleet API `GET /api/1/vehicles` 响应始终携带。
+    public init(id: String, name: String, vin: String = "", state: String = "") {
         self.id = id
         self.name = name
         self.vin = vin
+        self.state = state
     }
 
-    private enum CodingKeys: String, CodingKey { case id, name, vin }
+    private enum CodingKeys: String, CodingKey { case id, name, vin, state }
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         id = try c.decode(String.self, forKey: .id)
         name = try c.decode(String.self, forKey: .name)
         vin = try c.decodeIfPresent(String.self, forKey: .vin) ?? ""
+        state = try c.decodeIfPresent(String.self, forKey: .state) ?? ""
     }
 }
 
@@ -80,28 +85,45 @@ public struct VehicleSnapshot: Sendable, Equatable, Codable {
         }
     }
 
+    public struct Position: Sendable, Equatable, Codable {
+        public let latitude: Double
+        public let longitude: Double
+        public init(latitude: Double, longitude: Double) {
+            self.latitude = latitude
+            self.longitude = longitude
+        }
+    }
+
     public enum State: String, Sendable, Equatable, Codable {
         case online, asleep, offline
     }
-
     public let charge: Charge
     public let climate: Climate
     public let doors: Doors
     /// Kilometers.
     public let odometerKm: Double
     public let state: State
+    /// drive_state.shift_state 非 P 且非空（D/R/N）→ 行驶中。
+    public let driving: Bool
+    public let position: Position?
+    /// 位置获取失败原因（nil = 成功或未尝试）。地图异常卡展示。
+    public var positionError: String?
     /// When the API generated this data (ms since Unix epoch).
     public let timestampMs: Int64
 
     public init(
         charge: Charge, climate: Climate, doors: Doors,
-        odometerKm: Double, state: State, timestampMs: Int64
+        odometerKm: Double, state: State, driving: Bool = false,
+        position: Position? = nil, positionError: String? = nil, timestampMs: Int64
     ) {
         self.charge = charge
         self.climate = climate
         self.doors = doors
         self.odometerKm = odometerKm
         self.state = state
+        self.driving = driving
+        self.position = position
+        self.positionError = positionError
         self.timestampMs = timestampMs
     }
 }

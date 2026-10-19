@@ -9,7 +9,8 @@ import Testing
     let json = """
         {"id":"123","name":"My Tesla","charge":{"batteryPercent":77,"rangeKm":238.6,"state":"Charging","minutesToFull":45},
          "climate":{"insideC":21.5,"outsideC":8.0},"doors":{"locked":true,"frontTrunkOpen":false,"rearTrunkOpen":true},
-         "odometerKm":12834.2,"state":"online","timestampMs":1760000000000}
+         "odometerKm":12834.2,"state":"online","driving":false,
+         "position":{"latitude":31.2304,"longitude":121.4737},"timestampMs":1760000000000}
         """
     let snapshot = try JSONDecoder().decode(VehicleSnapshot.self, from: Data(json.utf8))
     #expect(snapshot.charge.batteryPercent == 77)
@@ -17,6 +18,8 @@ import Testing
     #expect(snapshot.climate.outsideC == 8.0)
     #expect(snapshot.doors.rearTrunkOpen)
     #expect(snapshot.state == .online)
+    #expect(snapshot.position?.latitude == 31.2304)
+    #expect(snapshot.position?.longitude == 121.4737)
     #expect(snapshot.timestampMs == 1_760_000_000_000)
 
     let entry = try JSONDecoder().decode(VehicleListEntry.self, from: Data(#"{"id":"123","name":"My Tesla"}"#.utf8))

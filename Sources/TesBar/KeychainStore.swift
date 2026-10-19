@@ -1,7 +1,7 @@
 import Foundation
 import Security
 
-/// 凭证存取：access/refresh token 与 VCP 私钥（PEM 字节）→ Keychain。
+/// 凭证存取：access/refresh token → Keychain（VCP 私钥已改为构建内置，ADR-0004）。
 public enum KeychainError: Error, Equatable {
     case unhandled(OSStatus)
     case itemNotFound
@@ -9,11 +9,9 @@ public enum KeychainError: Error, Equatable {
 
 public struct KeychainStore: Sendable {
     private let service: String
-    private let privateKeyAccount: String
 
-    public init(service: String = "com.tesbar.app", privateKeyAccount: String = "vcp-private-key") {
+    public init(service: String = "com.tesbar.app") {
         self.service = service
-        self.privateKeyAccount = privateKeyAccount
     }
 
     // MARK: Token
@@ -36,23 +34,6 @@ public struct KeychainStore: Sendable {
     /// Presence check without throwing (UI uses this to decide guidance).
     public func hasToken(_ account: String) -> Bool {
         (try? data(account: account)) != nil
-    }
-
-    // MARK: VCP private key
-
-    public func savePrivateKey(_ pem: Data) throws {
-        try setData(pem, account: privateKeyAccount)
-    }
-
-    public func readPrivateKey() throws -> Data {
-        guard let data = try data(account: privateKeyAccount) else {
-            throw KeychainError.itemNotFound
-        }
-        return data
-    }
-
-    public func deletePrivateKey() throws {
-        try deleteData(account: privateKeyAccount)
     }
 
     // MARK: SecItem CRUD

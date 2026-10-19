@@ -66,7 +66,7 @@ public actor AuthService {
     public static let tokenEndpoint = URL(string: "https://auth.tesla.cn/oauth2/v3/token")!
     public static let authorizeEndpoint = "https://auth.tesla.cn/oauth2/v3/authorize"
     public static let redirectURI = "http://localhost:2610/auth"
-    static let scope = "openid offline_access user_data vehicle_device_data vehicle_cmds vehicle_charging_cmds"
+    static let scope = "openid offline_access user_data vehicle_device_data vehicle_location vehicle_cmds vehicle_charging_cmds"
     static let accessAccount = "tesbar-access-token"
     static let refreshAccount = "tesbar-refresh-token"
 
@@ -78,9 +78,10 @@ public actor AuthService {
     private let keychain: KeychainStore
     private let logger = Logger(subsystem: "com.tesbar.app", category: "auth")
 
+    /// 凭据默认取自 ``BuildConfig``（ADR-0004）；参数保留供测试注入。
     public init(
-        clientID: String,
-        clientSecret: String,
+        clientID: String = BuildConfig.clientID,
+        clientSecret: String = BuildConfig.clientSecret,
         audience: String = "https://fleet-api.prd.cn.vn.cloud.tesla.cn",
         transport: any HTTPExecuting = URLSessionTransport(),
         keychain: KeychainStore = KeychainStore()
@@ -90,6 +91,13 @@ public actor AuthService {
         self.audience = audience
         self.transport = transport
         self.keychain = keychain
+    }
+
+    /// 退出登录（ADR-0004）：删除两个 token。不做服务端 revoke（Tesla 无此端点）；
+    /// VCP 私钥与已完成的配对保留（内置常量/车端状态）。
+    public func signOut() {
+        try? keychain.deleteToken(Self.accessAccount)
+        try? keychain.deleteToken(Self.refreshAccount)
     }
 
     // MARK: Web authorization (system UI — not unit-tested; exchange() below is)

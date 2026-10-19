@@ -62,7 +62,11 @@ public actor FleetTeslaClient: TeslaClient {
                 let id: Int64
                 let vin: String
                 let displayName: String?
-                enum CodingKeys: String, CodingKey { case id, vin, displayName = "display_name" }
+                let state: String?
+                enum CodingKeys: String, CodingKey {
+                    case id, vin, state
+                    case displayName = "display_name"
+                }
             }
             let response: [Entry]
         }
@@ -70,13 +74,39 @@ public actor FleetTeslaClient: TeslaClient {
         let entries = try JSONDecoder()
             .decode(Response.self, from: json)
             .response
-            .map { VehicleListEntry(id: String($0.id), name: $0.displayName ?? $0.vin, vin: $0.vin) }
+            .map {
+                VehicleListEntry(
+                    id: String($0.id),
+                    name: $0.displayName ?? $0.vin,
+                    vin: $0.vin,
+                    state: $0.state ?? ""
+                )
+            }
         vins = Dictionary(entries.map { ($0.id, $0.vin) }, uniquingKeysWith: { a, _ in a })
         return entries
     }
 
     public func vehicleData(id: String) async throws -> VehicleSnapshot {
-        try VehicleSnapshotMapper.map(try await get(path: "/api/1/vehicles/\(id)/vehicle_data"))
+        // endpoints 选择器：停放时 drive_state 不含坐标，需显式请求 location_data
+        //（tesla-api#786）。授权未含 vehicle_location scope 时整请求 403 →
+        // 降级重发（无位置，但电量/温度等照常），失败原因记入 positionError 供异常卡展示。
+        do {
+            return try VehicleSnapshotMapper.map(try await get(
+                path: "/api/1/vehicles/\(id)/vehicle_data",
+                query: [("endpoints", "location_data;charge_state;climate_state;drive_state;vehicle_state")]
+            ))
+        } catch let e as HTTPStatusError where e.status == 403 {
+            var snap = try VehicleSnapshotMapper.map(try await get(
+                path: "/api/1/vehicles/\(id)/vehicle_data",
+                query: [("endpoints", "charge_state;climate_state;drive_state;vehicle_state")]
+            ))
+            snap.positionError = e.body.map { body in
+                body.contains("vehicle_location")
+                    ? "缺少位置权限（vehicle_location scope）。请退出登录后重新登录，授权时勾选位置权限。"
+                    : body
+            }
+            return snap
+        }
     }
 
     /// REST wake (not VCSEC RKE_ACTION_WAKE): a REST state comes back that pollers can
@@ -295,9 +325,9 @@ public actor FleetTeslaClient: TeslaClient {
         return try decodeSignedResponse(status: r.status, body: r.body)
     }
 
-    private func get(path: String) async throws -> Data {
+    private func get(path: String, query: [(String, String)] = []) async throws -> Data {
         let r = try await withPartnerRegistration {
-            try await self.auth.authorized { try await self.send(path: path, body: nil) }
+            try await self.auth.authorized { try await self.send(path: path, query: query, body: nil) }
         }
         _ = try Self.mapStatus(r.status, r.body)
         return r.body
@@ -346,11 +376,20 @@ public actor FleetTeslaClient: TeslaClient {
 
     /// One request out through the region-aware transport; no status check here — callers
     /// map statuses (throwing `HTTPStatusError` makes `authorized` retry 401s).
-    private func send(path: String, body: Data?) async throws
+    private func send(path: String, query: [(String, String)] = [], body: Data?) async throws
         -> (status: Int, headers: [String: String], body: Data)
     {
         let base = resolver.baseURL
-        var request = URLRequest(url: base.appendingPathComponent(path))
+        var components = URLComponents(url: base.appendingPathComponent(path), resolvingAgainstBaseURL: false)!
+        if !query.isEmpty {
+            components.queryItems = query.map { URLQueryItem(name: $0.0, value: $0.1) }
+            // URLComponents 保留 ; 原样（合法 pchar），Tesla 的 endpoints 选择器要求
+            // 分号编码为 %3B——裸 ; 会被服务器当成只传了第一个 endpoint
+            //（实测只返回 drive_state，其余字段静默缺失）。
+            components.percentEncodedQuery = components.percentEncodedQuery?
+                .replacingOccurrences(of: ";", with: "%3B")
+        }
+        var request = URLRequest(url: components.url!)
         request.httpMethod = body == nil ? "GET" : "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         if let token = try? await auth.currentAccessToken() {
@@ -440,14 +479,20 @@ enum VehicleSnapshotMapper {
             let chargeState: ChargeState?
             let climateState: ClimateState?
             let vehicleState: VehicleState?
-            let timestampMs: Int64?
+            let driveState: DriveState?
+            // vehicle_data 用 "timestamp"；telemetry 用 "timestamp_ms"。两个都收。
+            let timestamp: Int64?
+            let timestampMsRaw: Int64?
             enum CodingKeys: String, CodingKey {
                 case state
                 case chargeState = "charge_state"
                 case climateState = "climate_state"
                 case vehicleState = "vehicle_state"
-                case timestampMs = "timestamp_ms"
+                case driveState = "drive_state"
+                case timestampMsRaw = "timestamp_ms"
+                case timestamp
             }
+            var timestampMs: Int64? { timestampMsRaw ?? timestamp }
             struct ChargeState: Decodable {
                 let batteryLevel: Int?
                 let batteryRange: Double?
@@ -474,6 +519,23 @@ enum VehicleSnapshotMapper {
                 let rt: Int?
                 let odometer: Double?
             }
+            struct DriveState: Decodable {
+                /// P = parked, D/R/N = moving, nil = 未上报（睡眠时无 drive_state）。
+                let shiftState: String?
+                let latitude: Double?
+                let longitude: Double?
+                /// 中国区 GCJ-02 坐标（native_type=gcj）：Apple Maps 中国底图是 GCJ，
+                /// 用 WGS 的 latitude/longitude 会偏 ~500m。优先取 native。
+                let nativeLatitude: Double?
+                let nativeLongitude: Double?
+                enum CodingKeys: String, CodingKey {
+                    case shiftState = "shift_state"
+                    case latitude
+                    case longitude
+                    case nativeLatitude = "native_latitude"
+                    case nativeLongitude = "native_longitude"
+                }
+            }
         }
 
         let p = try JSONDecoder().decode(Response.self, from: json).response
@@ -496,6 +558,16 @@ enum VehicleSnapshotMapper {
                 rearTrunkOpen: (p.vehicleState?.rt ?? 0) != 0),
             odometerKm: (p.vehicleState?.odometer ?? 0) * 1.609344,
             state: state,
+            // 行驶中 = drive_state.shift_state 有值且不是 P（睡眠时无 drive_state → false）。
+            driving: p.driveState.map { $0.shiftState.map { !$0.isEmpty && $0 != "P" } ?? false } ?? false,
+            position: p.driveState.flatMap { d in
+                // GCJ 优先（Apple Maps 中国底图同坐标系）；非中国无 native 字段退 WGS。
+                if let lat = d.nativeLatitude, let lon = d.nativeLongitude {
+                    return .init(latitude: lat, longitude: lon)
+                }
+                guard let lat = d.latitude, let lon = d.longitude else { return nil }
+                return .init(latitude: lat, longitude: lon)
+            },
             timestampMs: p.timestampMs ?? 0
         )
     }

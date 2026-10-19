@@ -3,3 +3,5 @@
 .DS_Store
 .swiftpm/
 build/
+*.pem
+Sources/TesBar/BuildConfig.swift

@@ -1,59 +1,33 @@
 import Foundation
 import Security
 
-/// VCP 密钥对：prime256v1（P-256）。ECDH+HMAC 会话密钥来源（ticket 12），本类型不做签名。
-/// 私钥以 SEC1（RFC 5915）PEM 存 Keychain；公钥以 SPKI PEM 供 `.well-known` 托管与配对展示。
+/// VCP 密钥对（ADR-0004）：共享密钥随构建内置（``BuildConfig``），全部分发设备
+/// 与全部已配对车辆共用一把 Virtual Key。公钥 SPKI PEM 由托管域名提供；私钥
+/// SEC1 PEM 在打包时注入，本类型不再生成/存储任何密钥。
 public struct VCPKeyManager: Sendable {
     public enum KeyError: Error, Equatable {
-        case generationFailed(String)
+        /// 构建未注入共享私钥（开发构建）；签名指令不可用。
+        case sharedKeyMissing
         case malformedStoredKey
     }
 
-    private let store: KeychainStore
+    /// 测试注入点：非 nil 覆盖 BuildConfig 的私钥 PEM（进程内全局，
+    /// 语义等同"另一把共享密钥"）。
+    public nonisolated(unsafe) static var overridePrivateKeyPEM: String?
 
-    public init(store: KeychainStore = KeychainStore()) {
-        self.store = store
-    }
+    public init() {}
 
-    /// 幂等：Keychain 无私钥则生成 P-256 对并持久化；返回公钥 PEM（`-----BEGIN PUBLIC KEY-----`）。
-    @discardableResult
-    public func ensureKeyPair() throws -> String {
-        if let stored = try? store.readPrivateKey(),
-           let pubPEM = try? publicPEM(fromPrivatePEM: String(decoding: stored, as: UTF8.self)) {
-            return pubPEM
-        }
-        var cfError: Unmanaged<CFError>?
-        guard let priv = SecKeyCreateRandomKey([
-            kSecAttrKeyType as String: kSecAttrKeyTypeECSECPrimeRandom,
-            kSecAttrKeySizeInBits as String: 256,
-        ] as CFDictionary, &cfError) else {
-            throw KeyError.generationFailed(String(describing: cfError?.takeRetainedValue()))
-        }
-        try store.savePrivateKey(Data(privatePEM(priv).utf8))
-        return publicPEM(SecKeyCopyPublicKey(priv)!)
-    }
-
-    /// 从 Keychain PEM 重建私钥 SecKey（供 ticket 12 做 ECDH）。
+    /// 共享私钥（构建注入）。nil = 开发构建。
     public func loadPrivateKey() throws -> SecKey {
-        try secKey(fromPrivatePEM: String(decoding: try store.readPrivateKey(), as: UTF8.self))
+        guard let pem = Self.overridePrivateKeyPEM ?? BuildConfig.vcpPrivateKeyPEM, !pem.isEmpty else {
+            throw KeyError.sharedKeyMissing
+        }
+        return try secKey(fromPrivatePEM: pem)
     }
 
-    // MARK: - PEM 编码
-
-    /// 私钥 PEM（`-----BEGIN EC PRIVATE KEY-----`，SEC1）。
-    /// SecKeyCopyExternalRepresentation 的私钥外表示是 raw ANSI X9.63（point65||scalar32），
-    /// 此处自行包装为 DER。注意：本机 Security 框架（macOS 27）的 SecKeyCreateWithData
-    /// 只接受 raw 形式、拒绝 DER 输入（SEC1/PKCS#8/SPKI 均报 -50），因此 PEM 仅作存储与
-    /// 外部互操作格式，重建时解包回 raw。
-    func privatePEM(_ priv: SecKey) -> String {
-        let raw = SecKeyCopyExternalRepresentation(priv, nil)! as Data
-        let sec1 = [tlv(0x02, Data([1])),                    // version = 1
-                    tlv(0x04, raw.suffix(32)),               // privateKey scalar（raw = point||scalar）
-                    tlv(0xA0, tlv(0x06, p256OID)),           // [0] namedCurve OBJECT
-                    tlv(0xA1, tlv(0x03, Data([0x00]) + raw.prefix(65)))] // [1] publicKey point
-            .reduce(into: Data(), +=)
-        let sec1DER = tlv(0x30, sec1)
-        return Self.wrapPEM(header: "EC PRIVATE KEY", der: sec1DER)
+    /// 托管公钥 PEM：从共享私钥推导（构建脚本会与线上 `.well-known` 比对）。
+    public func publicKeyPEM() throws -> String {
+        publicPEM(SecKeyCopyPublicKey(try loadPrivateKey())!)
     }
 
     /// 公钥 PEM（`-----BEGIN PUBLIC KEY-----`，SPKI DER）。

@@ -49,6 +49,7 @@ actor ManualClock: PollClock {
 }
 
 /// Scripted TeslaClient: every call is recorded; snapshots come off a queue.
+/// `list` 可变：wakeNow 后测试把 state 翻回 online 模拟车醒。
 private actor FakeTeslaClient: TeslaClient {
     private(set) var listCalls = 0
     private(set) var dataCalls: [String] = []
@@ -97,7 +98,7 @@ private func snapshot(state: VehicleSnapshot.State, charging: Bool = false) -> V
 @available(macOS 14, *)
 @MainActor
 private func makeStore(
-    list: [VehicleListEntry] = [VehicleListEntry(id: "car1", name: "My Tesla")],
+    list: [VehicleListEntry] = [VehicleListEntry(id: "car1", name: "My Tesla", state: "online")],
     snapshots: [VehicleSnapshot],
     defaults: UserDefaults
 ) async -> (VehicleStore, ManualClock, FakeTeslaClient) {
@@ -189,27 +190,58 @@ private func settle() async { try? await Task.sleep(nanoseconds: 50_000_000) }
 
 @available(macOS 14, *) @MainActor @Test func sleepingVehicleIsNeverPolledOrWoken() async throws {
     let (store, clock, client) = await makeStore(
+        list: [VehicleListEntry(id: "car1", name: "My Tesla", state: "asleep")],
         snapshots: [snapshot(state: .asleep)], defaults: isolatedDefaults()
     )
     await store.menuOpened()
     store.startPolling()
-    let callsAtOpen = await client.dataCalls.count
+    // ADR-0004：睡眠车连 menuOpened 也不拉 vehicle_data。
+    #expect(await client.dataCalls.isEmpty)
+    #expect(store.snapshot == nil)
+    #expect(store.vehicles.first?.state == "asleep")
 
     await yieldUntilPending(clock)
     await clock.advance(900)
     await yieldUntilPending(clock)
     await settle()
-    #expect(await client.dataCalls.count == callsAtOpen) // no data poll while asleep
+    #expect(await client.dataCalls.isEmpty) // no data poll while asleep
     #expect(await client.wakeCalls.isEmpty) // and never woken for data
     store.stopPolling()
+}
+
+@available(macOS 14, *) @MainActor @Test func offlineListStateSkipsVehicleData() async throws {
+    let (store, _, client) = await makeStore(
+        list: [VehicleListEntry(id: "car1", name: "My Tesla", state: "offline")],
+        snapshots: [snapshot(state: .offline)], defaults: isolatedDefaults()
+    )
+    await store.menuOpened()
+    #expect(await client.dataCalls.isEmpty)
+    #expect(store.snapshot == nil)
+    #expect(store.error == nil)
+    #expect(store.isLoading == false)
+}
+
+@available(macOS 14, *) @MainActor @Test func wakeNowWakesThenFetches() async throws {
+    let (store, _, client) = await makeStore(
+        list: [VehicleListEntry(id: "car1", name: "My Tesla", state: "asleep")],
+        snapshots: [snapshot(state: .online)], defaults: isolatedDefaults()
+    )
+    await store.menuOpened()
+    #expect(await client.dataCalls.isEmpty)
+
+    await store.wakeNow()
+    #expect(await client.wakeCalls == ["car1"])
+    #expect(await client.dataCalls == ["car1"]) // wake 后立即取数
+    #expect(store.snapshot?.state == .online)
+    #expect(store.error == nil)
 }
 
 @available(macOS 14, *) @MainActor @Test func switchingVehicleFetchesSelectionAndPersistsIt() async throws {
     let defaults = isolatedDefaults()
     let (store, _, client) = await makeStore(
         list: [
-            VehicleListEntry(id: "car1", name: "Daily"),
-            VehicleListEntry(id: "car2", name: "Weekend"),
+            VehicleListEntry(id: "car1", name: "Daily", state: "online"),
+            VehicleListEntry(id: "car2", name: "Weekend", state: "online"),
         ],
         snapshots: [snapshot(state: .online)], defaults: defaults
     )
@@ -223,24 +255,16 @@ private func settle() async { try? await Task.sleep(nanoseconds: 50_000_000) }
     // A fresh store (app relaunch) restores the remembered selection.
     let clock2 = ManualClock()
     let client2 = FakeTeslaClient(
-        list: [VehicleListEntry(id: "car1", name: "Daily"), VehicleListEntry(id: "car2", name: "Weekend")],
+        list: [
+            VehicleListEntry(id: "car1", name: "Daily", state: "online"),
+            VehicleListEntry(id: "car2", name: "Weekend", state: "online"),
+        ],
         snapshots: [snapshot(state: .online)]
     )
     let relaunched = VehicleStore(client: client2, clock: clock2, defaults: defaults)
     await relaunched.menuOpened()
     #expect(relaunched.selectedVehicleID == "car2")
     #expect(await client2.dataCalls == ["car2"])
-}
-
-@available(macOS 14, *) @MainActor @Test func offlineIsAStateNotAnError() async throws {
-    let store = await makeStore(
-        snapshots: [snapshot(state: .offline)], defaults: isolatedDefaults()
-    ).0
-
-    await store.menuOpened()
-    #expect(store.snapshot?.state == .offline)
-    #expect(store.error == nil)
-    #expect(store.isLoading == false)
 }
 
 @available(macOS 14, *) @MainActor @Test func listFailureSurfacesAsError() async throws {
@@ -251,6 +275,22 @@ private func settle() async { try? await Task.sleep(nanoseconds: 50_000_000) }
     await store.menuOpened()
     #expect(store.error != nil)
     #expect(store.snapshot == nil)
+}
+
+@available(macOS 14, *) @MainActor @Test func signOutClearsVehiclesAndSelection() async throws {
+    let defaults = isolatedDefaults()
+    let (store, _, _) = await makeStore(
+        snapshots: [snapshot(state: .online)], defaults: defaults
+    )
+    await store.menuOpened()
+    #expect(store.vehicles.count == 1)
+
+    store.clearForSignOut()
+    #expect(store.vehicles.isEmpty)
+    #expect(store.snapshot == nil)
+    #expect(store.selectedVehicleID == nil)
+    #expect(store.error == nil)
+    #expect(defaults.string(forKey: "selectedVehicleID") == nil)
 }
 
 private struct FailingListClient: TeslaClient {
