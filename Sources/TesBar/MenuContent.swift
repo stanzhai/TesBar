@@ -88,9 +88,16 @@ struct MenuContent: View {
         case .succeeded:
             Label("已发送", systemImage: "checkmark.circle").font(.caption).foregroundStyle(.green)
         case .failed(let reason, let retryable):
-            HStack {
-                Label(reason, systemImage: "exclamationmark.triangle")
-                    .font(.caption).foregroundStyle(.red).lineLimit(2)
+            HStack(alignment: .top) {
+                Label {
+                    Text(reason)
+                        // 指令失败原因可能很长（带 API 响应体），允许完整换行。
+                        .font(.caption).foregroundStyle(.red)
+                        .fixedSize(horizontal: false, vertical: true)
+                } icon: {
+                    Image(systemName: "exclamationmark.triangle")
+                        .font(.caption).foregroundStyle(.red)
+                }
                 if retryable {
                     Button("重试") { Task { await executor.retry() } }
                         .controlSize(.small)
@@ -151,7 +158,11 @@ struct StatusCard: View {
                 emptyState
             }
             if let error = store.error, store.snapshot != nil {
-                Text(error).font(.caption2).foregroundStyle(.red)
+                // 错误原文常含长 token/URL（无空格可断），默认单行截断；
+                // fixedSize 允许纵向展开，逐字符换行显示完整原因。
+                Text(error)
+                    .font(.caption2).foregroundStyle(.red)
+                    .fixedSize(horizontal: false, vertical: true)
             }
         }
         .task {
@@ -320,7 +331,9 @@ struct StatusCard: View {
                 .foregroundStyle(.orange)
             VStack(alignment: .leading, spacing: 2) {
                 Text("车辆位置获取失败").font(.footnote.weight(.semibold))
-                Text(reason).font(.caption).foregroundStyle(.secondary)
+                Text(reason)
+                    .font(.caption).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
             Spacer()
         }
@@ -357,6 +370,7 @@ struct StatusCard: View {
             Text(store.error ?? "暂无数据")
                 .font(.callout).foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
             Button("重新加载") { Task { await store.refreshNow() } }
         }
         .frame(maxWidth: .infinity)
