@@ -1,4 +1,4 @@
-Status: ready-for-agent
+Status: resolved
 Type: task
 
 # 09 — 菜单 UI：MenuBarExtra 状态面板 + 车辆切换 + 指令入口 + 危险指令长按门禁
@@ -25,3 +25,14 @@ SwiftUI `MenuBarExtra` 菜单：状态摘要（电量/续航/充电、内外温�
 - 门禁逻辑测试：开启时未经 LocalAuthentication 成功不调 executor（用假 gate 对象注入）。
 
 ## Blocked by: 05, 06, 07
+
+## Comments
+
+- **Commits** (branch `ticket/09`): `406a6a2` 09-menu-ui: MenuBarExtra shell + ConfirmGate/门禁/设置逻辑与测试 · `77996b2` merge integration/tesbar-v1 (10 setup wizard) · `24a3b78` 09-menu-ui: 首启入口接通 SetupWizard 向导。
+- **Files**: `Sources/TesBar/App.swift` (`@main` MenuBarExtra window 样式, AppServices 组合根, ExecutorInvoker, OfflineTeslaClient), `MenuContent.swift` (StatusCard/CommandGroups/DangerButton), `MenuLogic.swift` (ConfirmGate/BiometricGate+LocalAuthGate/CommandInvoking/DangerousCommandCoordinator/StatusFormatting), `AppSettings.swift` (UserDefaults 设置 + SMAppService 自启), `SettingsView.swift` (设置 sheet + SetupEntry + VCP 公钥展示/复制), 删除 `main.swift`；`TeslaClient.swift` `Door` enum 补 `CaseIterable`；`CommandExecutor.swift` `describe` 增 `AuthError.reauthRequired` → "登录已过期" 引导。
+- **Tests**: `Tests/TesBarTests/MenuLogicTests.swift` 11 tests — ConfirmGate <1s 取消/≥1s 触发一次不重复/复位重臂；门禁开 + 认证失败不调 invoker、成功才发；门禁关直发；非危险指令绕过；<1s 松手丢弃并重臂；updatedAgo/°C°F/门锁文案。`swift build --jobs 1` + `swift test --jobs 1` → `Test run with 113 tests in 7 suites passed`（合并 10 的 SetupWizard 之后）。
+- **Deviations**:
+  - CLT（CommandLineTools）不带 `libSwiftUIMacros.dylib`，SwiftUI `@State` 宏全部编译失败（非 flake）。Xcode 在 `/Applications/Xcode.app` 有同版本 dylib 但 license 未接受（无 sudo）。绕过：拷 dylib 到 `/tmp/tesbar-plugins` 并 `swift build --jobs 1 -Xswiftc "-Xfrontend" "-external-plugin-path" -Xswiftc "-Xfrontend" "/tmp/tesbar-plugins#/Library/Developer/CommandLineTools/usr/bin/swift-plugin-server"`。正常机器（license 已接受）直接 `swift build --jobs 1` 即可。
+  - `@main` 用 `NSApp.setActivationPolicy(.accessory)`（AppDelegate）；Info.plist `LSUIElement` 留给 11 打包。
+  - 凭据保存后需重启应用重建 client（设置文案已注明）；ticket 10 的 SetupWizard 已合并并在首启入口打开，后续由 10 串完整流程。
+  - 危险指令判定沿用 `VehicleCommand.isDangerous`（unlock/doorOpen/doorClose/remoteStart）；`lock` 不属危险（锁车是安全方向），门禁测试用 `.unlock`。

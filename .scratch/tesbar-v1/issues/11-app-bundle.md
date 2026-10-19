@@ -1,4 +1,4 @@
-Status: ready-for-agent
+Status: resolved
 Type: task
 
 # 11 — 打包与常驻：App bundle（LSUIElement）+ 登录自启 + README
@@ -17,6 +17,12 @@ Type: task
 ## Acceptance
 
 - `Scripts/build-app.sh` 产出 TesBar.app，Info.plist 校验 LSUIElement。
+
+## Comments
+
+- `Scripts/build-app.sh`（release 构建 → Info.plist → 拷贝二进制 → ad-hoc 签名 best-effort → 打印路径）、`README.md`（构建/CLT 插件参数/首次设置/Virtual Key 配对/自启/限制）。SMAppService 自启开关已在 09 的 SettingsView 落地（`Sources/TesBar/SettingsView.swift`），本票未改动。
+- 验证：`./Scripts/build-app.sh` 端到端成功，`plutil` 确认 `LSUIElement=true`、`CFBundleIdentifier=com.tesbar.app`，`codesign -dv` 确认 ad-hoc 签名；`swift test`（带插件参数）113 tests / 7 suites 全绿。
+- 备注：实现由 orchestrator 完成（原 implementer 子代理因模型供应商 400 中断，脚本已写好未验证；本次补跑验证并提交）。`build/` 加入 .gitignore。
 - `swift test` 全绿。
 
 ## Blocked by: 09
