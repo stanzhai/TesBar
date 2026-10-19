@@ -94,6 +94,18 @@ private func makeWizard(
     #expect(wizard.isComplete)
 }
 
+@available(macOS 14, *) @MainActor @Test func finishedCallbackFiresOnceOnDone() {
+    let wizard = makeWizard(defaults: isolatedDefaults())
+    var fires = 0
+    wizard.onFinished = { fires += 1 }
+    wizard.skip()  // login → pair
+    #expect(fires == 0)
+    wizard.complete()  // pair → done
+    #expect(fires == 1)
+    wizard.skip()  // done 停住，不再触发
+    #expect(fires == 1)
+}
+
 @available(macOS 14, *) @MainActor @Test func skipWalksAllTheWayToDone() {
     let defaults = isolatedDefaults()
     let wizard = makeWizard(defaults: defaults)

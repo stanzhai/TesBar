@@ -52,6 +52,8 @@ public final class SetupWizard {
     @ObservationIgnored private let keys: VCPKeyManager
     @ObservationIgnored private let authFactory: () -> AuthService
     @ObservationIgnored private let clientFactory: (AuthService) -> any TeslaClient
+    /// 向导走完时回调（一次）：App 侧据此立即拉车辆列表，面板不再显示 SetupEntry。
+    @ObservationIgnored public var onFinished: (() -> Void)?
     @ObservationIgnored private var auth: AuthService?
 
     public init(
@@ -145,15 +147,19 @@ public final class SetupWizard {
     /// 完成步：置 setupComplete 标记（即使用户跳过验证——标记含义是“向导已走完，不再打扰”）。
     public func complete() {
         guard flow.step == .pair else { return }
-        defaults.set(true, forKey: Self.completeKey)
-        flow.next()
+        advance()
     }
 
     // MARK: 步进
 
     public func advance() {
         flow.next()
-        if flow.step == .done { defaults.set(true, forKey: Self.completeKey) }
+        if flow.step == .done {
+            defaults.set(true, forKey: Self.completeKey)
+            let cb = onFinished
+            onFinished = nil  // 只触发一次；重复 skip 到 done 不再调用
+            cb?()
+        }
     }
 
     /// 每步可跳过：不执行该步动作直接前进；到达 done 同样置完成标记。

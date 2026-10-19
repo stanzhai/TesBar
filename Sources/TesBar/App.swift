@@ -118,7 +118,7 @@ struct TesBarApp: App {
         .menuBarExtraStyle(.window)
 
         Window("TesBar 设置向导", id: SetupWizardView.windowID) {
-            SetupWizardWindow()
+            SetupWizardWindow(services: services)
         }
         .windowResizability(.contentSize)
     }
@@ -128,9 +128,17 @@ struct TesBarApp: App {
 /// 不再用 MenuBarExtra 面板的 sheet —— 面板对 attached sheet 的尺寸/焦点变化会整体关闭。
 @available(macOS 14, *)
 private struct SetupWizardWindow: View {
+    let services: AppServices
     @State private var wizard = SetupWizard()
 
     var body: some View {
         SetupWizardView(wizard: wizard)
+            .task {
+                // 向导走完（登录+验证成功）：立即拉车辆列表并取第一辆数据，
+                // 菜单面板从 SetupEntry 自动切到车辆信息。
+                wizard.onFinished = { [services] in
+                    Task { await services.store.refreshNow() }
+                }
+            }
     }
 }
