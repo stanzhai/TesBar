@@ -89,17 +89,14 @@ extension MenuContent {
     }
 
     /// 车辆名称行右端的状态徽标：发送中/已发送/指令失败原因/数据获取错误。
-    /// 长原因换行展示；与车辆名同占首行（错误时面板被撑高，属预期）。
+    /// 错误超长单行截断（面板高度稳定），tap 复制完整文本用于排查。
     @ViewBuilder private var statusBadge: some View {
         switch executor.status {
         case .idle:
             // 睡眠/离线的取数失败是预期行为（isOnline 守卫旁路的 408/超时），
             // 状态卡的"数据为 X 前"角标已覆盖，不重复报错。
             if let error = services.store.error, selectedState != "asleep" && selectedState != "offline" {
-                Label(error, systemImage: "exclamationmark.triangle")
-                    .font(.caption2).foregroundStyle(.red)
-                    .multilineTextAlignment(.trailing)
-                    .fixedSize(horizontal: false, vertical: true)
+                copyableError(error)
             }
         case .sending:
             HStack(spacing: 4) {
@@ -110,17 +107,8 @@ extension MenuContent {
             Label("已发送", systemImage: "checkmark.circle")
                 .font(.caption2).foregroundStyle(.green)
         case .failed(let reason, let retryable):
-            HStack(alignment: .top, spacing: 4) {
-                Label {
-                    Text(reason)
-                        // 指令失败原因可能很长（带 API 响应体），允许完整换行。
-                        .font(.caption2).foregroundStyle(.red)
-                        .multilineTextAlignment(.trailing)
-                        .fixedSize(horizontal: false, vertical: true)
-                } icon: {
-                    Image(systemName: "exclamationmark.triangle")
-                        .font(.caption2).foregroundStyle(.red)
-                }
+            HStack(spacing: 4) {
+                copyableError(reason)
                 if retryable {
                     Button("重试") { Task { await executor.retry() } }
                         .controlSize(.mini)
@@ -128,6 +116,25 @@ extension MenuContent {
                 }
             }
         }
+    }
+
+    /// 单行截断的红字错误；tap 复制完整内容（错误常带 API 响应体，截断后无法排查）。
+    private func copyableError(_ text: String) -> some View {
+        Button {
+            NSPasteboard.general.clearContents()
+            NSPasteboard.general.setString(text, forType: .string)
+        } label: {
+            Label {
+                Text(text)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+            } icon: {
+                Image(systemName: "exclamationmark.triangle")
+            }
+            .font(.caption2).foregroundStyle(.red)
+        }
+        .buttonStyle(.plain)
+        .help("点击复制完整错误信息")
     }
 }
 // MARK: - 右上角信息列（与车辆名称对齐）
