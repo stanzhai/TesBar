@@ -171,7 +171,9 @@ private func importPrivateKey(_ scalar: Data, publicPoint: Data) throws -> SecKe
 /// VCSEC command encodings spot-checked against field numbers in vcsec.proto.
 @Test func vcsecEncodings() {
     #expect(encodeVCSECUnsignedMessage(rkeAction: .lock) == hex("1001")) // RKEAction(2)=1
-    #expect(encodeVCSECUnsignedMessage(rkeAction: .unlock).isEmpty) // proto3 omits 0 default
+    // proto2 presence: set field serializes even at 0 — unlock = `10 00`
+    // (empty UnsignedMessage is what Fleet API 400s on; ticket 16).
+    #expect(encodeVCSECUnsignedMessage(rkeAction: .unlock) == hex("1000"))
     #expect(encodeVCSECUnsignedMessage(rkeAction: .remoteDrive) == hex("1014"))
     #expect(encodeVCSECUnsignedMessage(rkeAction: .wakeVehicle) == hex("101e"))
     // ClosureMoveRequest(frontTrunk=6: OPEN=3) → 22 02 30 03

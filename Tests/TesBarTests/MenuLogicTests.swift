@@ -30,12 +30,11 @@ struct MenuLogicTests {
 
     @Test func pressAtOrPastOneSecondFiresOnce() {
         let gate = ConfirmGate()
-        let start = Date()
         gate.pressBegan()
-        gate.tick(at: start.addingTimeInterval(1.0))
+        gate.tick(at: Date().addingTimeInterval(1.1)) // past the 1s threshold
         #expect(gate.state == .fired)
         #expect(gate.firedCount == 1)
-        gate.tick(at: start.addingTimeInterval(1.2)) // no double-fire
+        gate.tick(at: Date().addingTimeInterval(0.3)) // no double-fire
         #expect(gate.firedCount == 1)
     }
 

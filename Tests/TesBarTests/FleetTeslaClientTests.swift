@@ -254,8 +254,8 @@ struct FleetTeslaClientTests {
         let json = """
         {"response":{"state":"online",
           "charge_state":{"battery_level":77,"battery_range":148.2,"charging_state":"Charging","minutes_to_full_charge":45},
-          "climate_state":{"inside_temp":21.5,"outside_temp":8.0},
-          "vehicle_state":{"locked":true,"ft":0,"rt":1,"odometer":7974.1},
+          "climate_state":{"inside_temp":21.5,"outside_temp":8.0,"is_climate_on":true},
+          "vehicle_state":{"locked":true,"ft":0,"rt":1,"odometer":7974.1,"sentry_mode":true},
           "drive_state":{"shift_state":"P","latitude":31.2304,"longitude":121.4737,
             "native_latitude":31.2314,"native_longitude":121.4747,"native_type":"gcj"},
           "timestamp":1760000000000}}
@@ -268,13 +268,32 @@ struct FleetTeslaClientTests {
         #expect(abs(snap.charge.rangeKm - 148.2 * 1.609344) < 0.01)
         #expect(snap.charge.state == "Charging" && snap.charge.minutesToFull == 45)
         #expect(snap.climate.insideC == 21.5 && snap.climate.outsideC == 8.0)
+        #expect(snap.climate.hvacOn == true)
         #expect(snap.doors.locked == true && !snap.doors.frontTrunkOpen && snap.doors.rearTrunkOpen)
+        #expect(snap.doors.sentryOn == true)
         #expect(abs(snap.odometerKm - 7974.1 * 1.609344) < 0.1)
         // GCJ native 坐标优先（Apple Maps 中国底图同坐标系，WGS 会偏 ~500m）。
         #expect(snap.position?.latitude == 31.2314 && snap.position?.longitude == 121.4747)
         #expect(snap.state == .online && snap.timestampMs == 1_760_000_000_000)
         let url = transport.calls.first?.url ?? ""
         #expect(url.contains("/vehicle_data?") && url.contains("location_data"))
+    }
+
+    /// 控制卡状态字段缺失（睡眠车的空 climate/vehicle_state）→ nil，不猜。
+    @Test func vehicleDataOmitsAbsentControlStates() async throws {
+        let json = """
+        {"response":{"state":"online",
+          "charge_state":{"battery_level":50,"charging_state":"Stopped"},
+          "climate_state":{"inside_temp":20.0},
+          "vehicle_state":{"locked":false}}}
+        """
+        let transport = FleetScriptedTransport(vehicle: VehicleSim(), fleet: [.json(json)])
+        let (client, _, _) = try makeClient(transport)
+        let snap = try await client.vehicleData(id: "x")
+        #expect(snap.climate.hvacOn == nil)
+        #expect(snap.doors.sentryOn == nil)
+        #expect(snap.doors.locked == false)
+        #expect(snap.charge.state == "Stopped")
     }
 
     /// location_data 无 vehicle_location scope → 403 → 降级重发，仍取到数据。
@@ -324,9 +343,9 @@ struct FleetTeslaClientTests {
     @Test func unlockMapsToVCSECUnlock() async throws {
         let (msg, _, _) = try await runCommand(.unlock)
         #expect(msg.toDomain == .vcsec)
-        // UNLOCK = 0 → protobuf default → omitted; an empty UnsignedMessage is the
-        // wire form of unlock (VCSEC oneof arm RKE_action with default value).
-        #expect(msg.payload?.isEmpty == true)
+        // proto2 presence: RKE_action=UNLOCK(0) serializes explicitly (field 2 varint 0).
+        // An empty payload made Fleet API return HTTP 400 (ticket 16).
+        #expect(try Self.singleVarint(msg.payload!, field: 2) == 0)  // RKE_ACTION_UNLOCK
     }
 
     @Test func trunkOpenMapsToVCSECClosureMove() async throws {

@@ -423,9 +423,12 @@ struct VCSECClosureMoveRequest: Equatable, Sendable {
 }
 
 /// VCSEC.UnsignedMessage: RKEAction(2) enum or closureMoveRequest(4) submessage.
+/// vcsec.proto is proto2 with explicit presence: a *set* RKE_action always
+/// serializes, value 0 included — unlock = `10 00`, not an empty message
+/// (an empty UnsignedMessage is what Fleet API rejects with HTTP 400).
 func encodeVCSECUnsignedMessage(rkeAction: RKEAction? = nil, closureMove: VCSECClosureMoveRequest? = nil) -> Data {
     var w = ProtobufWriter()
-    if let rkeAction, rkeAction.rawValue != 0 { w.writeField(2, rkeAction.rawValue) }
+    if let rkeAction { w.writeField(2, rkeAction.rawValue) }
     if let closureMove { w.writeField(4, bytes: closureMove.encoded()) }
     return w.data
 }

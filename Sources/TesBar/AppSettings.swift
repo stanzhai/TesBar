@@ -14,15 +14,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 @MainActor
 final class AppSettings: ObservableObject {
     static let tempUnitKey = "temperatureUnitFahrenheit"
-    static let gateKey = "biometricGateEnabled"
 
     /// true = °F。
     @Published var useFahrenheit: Bool {
         didSet { UserDefaults.standard.set(useFahrenheit, forKey: Self.tempUnitKey) }
-    }
-    /// Touch ID/PIN 门禁，默认关（ADR-0003）。
-    @Published var biometricGateEnabled: Bool {
-        didSet { UserDefaults.standard.set(biometricGateEnabled, forKey: Self.gateKey) }
     }
     /// 登录自启（SMAppService）。开关切换注册/注销。
     @Published var launchAtLogin: Bool {
@@ -35,7 +30,6 @@ final class AppSettings: ObservableObject {
     init() {
         let d = UserDefaults.standard
         useFahrenheit = d.bool(forKey: Self.tempUnitKey)
-        biometricGateEnabled = d.bool(forKey: Self.gateKey)
         launchAtLogin = d.bool(forKey: "launchAtLogin")
     }
 

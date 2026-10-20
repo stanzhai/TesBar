@@ -65,10 +65,13 @@ public struct VehicleSnapshot: Sendable, Equatable, Codable {
         /// Degrees Celsius, nil while asleep/offline.
         public let insideC: Double?
         public let outsideC: Double?
+        /// climate_state.is_climate_on；nil = 未上报（睡眠/离线）。
+        public let hvacOn: Bool?
 
-        public init(insideC: Double?, outsideC: Double?) {
+        public init(insideC: Double?, outsideC: Double?, hvacOn: Bool? = nil) {
             self.insideC = insideC
             self.outsideC = outsideC
+            self.hvacOn = hvacOn
         }
     }
 
@@ -77,11 +80,14 @@ public struct VehicleSnapshot: Sendable, Equatable, Codable {
         public let locked: Bool?
         public let frontTrunkOpen: Bool
         public let rearTrunkOpen: Bool
+        /// vehicle_state.sentry_mode；nil = 未上报。
+        public let sentryOn: Bool?
 
-        public init(locked: Bool?, frontTrunkOpen: Bool, rearTrunkOpen: Bool) {
+        public init(locked: Bool?, frontTrunkOpen: Bool, rearTrunkOpen: Bool, sentryOn: Bool? = nil) {
             self.locked = locked
             self.frontTrunkOpen = frontTrunkOpen
             self.rearTrunkOpen = rearTrunkOpen
+            self.sentryOn = sentryOn
         }
     }
 

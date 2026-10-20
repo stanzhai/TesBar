@@ -37,7 +37,7 @@ final class AppServices {
         coordinator = DangerousCommandCoordinator(
             invoker: ExecutorInvoker(executor: executor, store: store),
             biometrics: LocalAuthGate(),
-            gateEnabled: { [settings] in settings.biometricGateEnabled }
+            gateEnabled: { false }  // 门禁设置已随设置面板移除；长按确认（ADR-0003）保留
         )
 
         // 故事 33：启动检查 access token，过期前静默续期。
@@ -77,6 +77,10 @@ final class ExecutorInvoker: CommandInvoking {
     func invoke(_ command: VehicleCommand) async {
         guard let id = store.selectedVehicleID else { return }
         await executor.execute(command, vehicleID: id)
+        // 发令成功后拉新快照，卡片/状态卡显示确认结果（同 CommandCards.send）。
+        if executor.status == .succeeded {
+            await store.refreshAfterCommand()
+        }
     }
 }
 
@@ -116,6 +120,11 @@ struct TesBarApp: App {
             menuIconImage
         }
         .menuBarExtraStyle(.window)
+
+        Window("TesBar 设置", id: SettingsView.windowID) {
+            SettingsView(services: services)
+        }
+        .windowResizability(.contentSize)
 
         Window("TesBar 设置向导", id: SetupWizardView.windowID) {
             SetupWizardWindow(services: services)

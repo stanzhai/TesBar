@@ -3,6 +3,8 @@ import SwiftUI
 /// 设置（故事 2/36/37）：自启、门禁、温度单位、账户（退出登录，ADR-0004）。
 @available(macOS 14, *)
 struct SettingsView: View {
+    /// App scene id：`Window(id:)` 与 `openWindow(id:)` 共用（同 SetupWizardView）。
+    public static let windowID = "settings"
     let services: AppServices
     @ObservedObject private var settings: AppSettings
     @State private var autostart = false
@@ -27,14 +29,6 @@ struct SettingsView: View {
                     Text("°F").tag(true)
                 }
                 .pickerStyle(.segmented)
-            }
-            Section("危险指令门禁（默认关）") {
-                Toggle("Touch ID / 密码门禁", isOn: Binding(
-                    get: { settings.biometricGateEnabled },
-                    set: { settings.biometricGateEnabled = $0 }
-                ))
-                Text("开启后，解锁/车门/后备箱/远程启动等危险指令在长按确认后还需通过 Touch ID 或登录密码。")
-                    .font(.caption).foregroundStyle(.secondary)
             }
             Section("账户") {
                 HStack {

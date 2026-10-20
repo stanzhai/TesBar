@@ -152,6 +152,65 @@ public final class VehicleStore: @unchecked Sendable {
         }
     }
 
+    /// 发令成功后的确认刷新：车已被 executor.ensureAwake 唤醒成 online，
+    /// 绕过 isOnline 守卫直接拉 vehicle_data（refreshNow 的 list state 可能还是旧的
+    /// asleep，会被守卫跳过）。等 load 落定再返回。
+    public func refreshAfterCommand() async {
+        guard let id = selectedVehicleID else { return }
+        await load(id, force: true)
+        await awaitPendingLoadsForTest()
+    }
+
+    /// 发令成功后的确认刷新 + 收敛轮询：Tesla 后端的 vehicle_data 有几秒滞后，
+    /// 一次拉新常常还是旧状态（已锁/未锁、空调、哨兵、充电）。最多再拉 4 次
+    ///（间隔 2s），相关字段翻转即停 —— 状态卡和右上角徽标及时跟上实际车况。
+    public func refreshAfterCommand(expected change: VehicleCommand) async {
+        await refreshAfterCommand()
+        guard let initial = snapshot else { return }
+        for _ in 0..<4 {
+            try? await clock.sleep(for: 2)
+            if await pollAfterCommand(expected: change, baseline: initial) { break }
+        }
+    }
+
+    /// One convergence step: refetch and report whether the command's field flipped.
+    /// `baseline` = post-command immediate snapshot; nil → compare against nothing (returns true for no-op commands).
+    public func pollAfterCommand(expected change: VehicleCommand, baseline: VehicleSnapshot?) async -> Bool {
+        guard let id = selectedVehicleID else { return true }
+        await load(id, force: true)
+        await awaitPendingLoadsForTest()
+        guard let initial = baseline, let fresh = snapshot else { return true }
+        return Self.changed(command: change, before: initial, after: fresh)
+    }
+
+    /// The command's observable field flip, e.g. lock → doors.locked == true.
+    private static func changed(
+        command: VehicleCommand, before: VehicleSnapshot, after: VehicleSnapshot
+    ) -> Bool {
+        switch command {
+        case .unlock: return after.doors.locked == false && before.doors.locked != false
+        case .lock: return after.doors.locked == true && before.doors.locked != true
+        case .hvacOn: return after.climate.hvacOn == true && before.climate.hvacOn != true
+        case .hvacOff: return after.climate.hvacOn == false && before.climate.hvacOn != false
+        case .sentry(let on): return after.doors.sentryOn == on && before.doors.sentryOn != on
+        case .startCharge: return after.charge.state == "Charging" && before.charge.state != "Charging"
+        case .stopCharge: return after.charge.state != "Charging" && before.charge.state == "Charging"
+        case .doorOpen(let door):
+            switch door {
+            case .frunk: return after.doors.frontTrunkOpen && !before.doors.frontTrunkOpen
+            case .trunk: return after.doors.rearTrunkOpen && !before.doors.rearTrunkOpen
+            default: return false
+            }
+        case .doorClose(let door):
+            switch door {
+            case .frunk: return !after.doors.frontTrunkOpen && before.doors.frontTrunkOpen
+            case .trunk: return !after.doors.rearTrunkOpen && before.doors.rearTrunkOpen
+            default: return false
+            }
+        default: return true // 其余指令（喇叭/闪灯/座椅加热…）无可观测快照字段，不轮询
+        }
+    }
+
     /// 刷新按钮（新行为）：先拉 list，车不 online 就 wake 并轮询等 online
     ///（最多 ~40s），然后拉数据。全程 isWaking=true 防重复点击。
     public func wakeAndRefresh() async {

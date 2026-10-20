@@ -508,16 +508,24 @@ enum VehicleSnapshotMapper {
             struct ClimateState: Decodable {
                 let insideTemp: Double?
                 let outsideTemp: Double?
+                let isClimateOn: Bool?
                 enum CodingKeys: String, CodingKey {
                     case insideTemp = "inside_temp"
                     case outsideTemp = "outside_temp"
+                    case isClimateOn = "is_climate_on"
                 }
             }
             struct VehicleState: Decodable {
                 let locked: Bool?
+                let sentryMode: Bool?
                 let ft: Int?
                 let rt: Int?
                 let odometer: Double?
+                enum CodingKeys: String, CodingKey {
+                    case locked
+                    case sentryMode = "sentry_mode"
+                    case ft, rt, odometer
+                }
             }
             struct DriveState: Decodable {
                 /// P = parked, D/R/N = moving, nil = 未上报（睡眠时无 drive_state）。
@@ -551,11 +559,13 @@ enum VehicleSnapshotMapper {
                 state: p.chargeState?.chargingState ?? "unknown",
                 minutesToFull: p.chargeState?.minutesToFullCharge),
             climate: .init(
-                insideC: p.climateState?.insideTemp, outsideC: p.climateState?.outsideTemp),
+                insideC: p.climateState?.insideTemp, outsideC: p.climateState?.outsideTemp,
+                hvacOn: p.climateState?.isClimateOn),
             doors: .init(
                 locked: p.vehicleState?.locked,
                 frontTrunkOpen: (p.vehicleState?.ft ?? 0) != 0,
-                rearTrunkOpen: (p.vehicleState?.rt ?? 0) != 0),
+                rearTrunkOpen: (p.vehicleState?.rt ?? 0) != 0,
+                sentryOn: p.vehicleState?.sentryMode),
             odometerKm: (p.vehicleState?.odometer ?? 0) * 1.609344,
             state: state,
             // 行驶中 = drive_state.shift_state 有值且不是 P（睡眠时无 drive_state → false）。

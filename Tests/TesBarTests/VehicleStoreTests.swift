@@ -74,6 +74,8 @@ private actor FakeTeslaClient: TeslaClient {
         return snapshots[0]
     }
 
+    func setSnapshots(_ s: [VehicleSnapshot]) { snapshots = s }
+
     func wake(id: String) async throws { wakeCalls.append(id) }
 
     func signAndSend(command: VehicleCommand, vehicleID: String) async throws {}
@@ -83,14 +85,16 @@ private actor FakeTeslaClient: TeslaClient {
 
 // MARK: - Fixtures
 
-private func snapshot(state: VehicleSnapshot.State, charging: Bool = false) -> VehicleSnapshot {
+private func snapshot(
+    state: VehicleSnapshot.State, charging: Bool = false, locked: Bool = true
+) -> VehicleSnapshot {
     VehicleSnapshot(
         charge: .init(
             batteryPercent: 77, rangeKm: 238.6,
             state: charging ? "Charging" : "Stopped", minutesToFull: charging ? 45 : nil
         ),
         climate: .init(insideC: 21.5, outsideC: 8.0),
-        doors: .init(locked: true, frontTrunkOpen: false, rearTrunkOpen: false),
+        doors: .init(locked: locked, frontTrunkOpen: false, rearTrunkOpen: false),
         odometerKm: 12_834.2, state: state, timestampMs: 1_760_000_000_000
     )
 }
@@ -219,6 +223,43 @@ private func settle() async { try? await Task.sleep(nanoseconds: 50_000_000) }
     #expect(store.snapshot == nil)
     #expect(store.error == nil)
     #expect(store.isLoading == false)
+}
+
+
+/// 发令后确认刷新：list 还是 asleep（executor 刚把车唤醒，list state 未更新），
+/// refreshAfterCommand 必须绕过 isOnline 守卫拉到新快照。
+@available(macOS 14, *) @MainActor @Test func refreshAfterCommandBypassesSleepGuard() async throws {
+    let (store, _, client) = await makeStore(
+        list: [VehicleListEntry(id: "car1", name: "My Tesla", state: "asleep")],
+        snapshots: [snapshot(state: .online, charging: true)], defaults: isolatedDefaults()
+    )
+    await store.menuOpened() // asleep 守卫：不拉数据
+    #expect(store.snapshot == nil)
+
+    await store.refreshAfterCommand()
+    #expect(await client.dataCalls == ["car1"])
+    #expect(store.snapshot?.charge.state == "Charging")
+}
+
+@available(macOS 14, *) @MainActor @Test func refreshAfterCommandPollsUntilLockFlips() async throws {
+    let (store, _, client) = await makeStore(
+        snapshots: [snapshot(state: .online, locked: true)],  // single: every call returns it
+        defaults: isolatedDefaults()
+    )
+    await store.menuOpened()
+    await store.awaitPendingLoadsForTest()
+    #expect(store.snapshot?.doors.locked == true)
+
+    // Immediate refresh still stale → not converged yet.
+    await store.refreshAfterCommand()
+    #expect(store.snapshot?.doors.locked == true)
+
+    // Backend catches up: next fetch flips the field.
+    await client.setSnapshots([snapshot(state: .online, locked: false)])
+    let done = await store.pollAfterCommand(expected: .unlock, baseline: store.snapshot)
+    #expect(done)
+    #expect(store.snapshot?.doors.locked == false)
+    store.stopPolling()
 }
 
 @available(macOS 14, *) @MainActor @Test func wakeNowWakesThenFetches() async throws {

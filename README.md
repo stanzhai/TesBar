@@ -32,6 +32,50 @@ macOS 菜单栏应用：查看 Tesla 车辆状态、发送控制指令。原生 
 
 CommandLineTools 环境缺少 `libSwiftUIMacros.dylib`（SwiftUI 宏插件运行时，随完整 Xcode 分发），`swift build` / `swift test` 需额外传 `external-plugin-path` 指向该 dylib 副本及插件服务器。`build-app.sh` 已内置；单独跑 `swift test` 见[测试](#测试)。
 
+## 密钥部署与三方一致（配对报错先看这里）
+
+三把公钥必须一致，配对才会过：**域名托管公钥** = **Tesla 注册公钥**（`POST /api/1/partner_accounts` 存的）= **app 内置私钥推导公钥**。任何一把不同步，Tesla App 扫码配对即报“无法授予第三方访问权限 / 此第三方未向Tesla注册”。
+
+日常部署（[ADR-0005](docs/adr/0005-shared-embedded-vcp-key.md) 流程）：
+
+1. `openssl ecparam -name prime256v1 -genkey -noout -out private.pem`（车辆仅支持 prime256v1）
+2. `openssl ec -in private.pem -pubout -out public.pem`，把 `public.pem` 内容上传到 `https://<pairing-domain>/.well-known/appspecific/com.tesla.3p.public-key.pem`（`Content-Type` 无所谓，Tesla 拉原始字节）
+3. `build-app.sh --private-key private.pem` 打包——脚本会自检内置私钥与线上托管公钥一致，不一致打警告
+
+### 换钥后必须重新注册（2026-10-19 踩过的坑）
+
+换密钥对后只更新托管 `.pem` **不够**：`partner_accounts` 里仍存旧公钥，配对照样报“未注册”。完整流程：
+
+```bash
+TOKEN=$(curl -sS -X POST 'https://auth.tesla.cn/oauth2/v3/token' \
+  -H 'Content-Type: application/x-www-form-urlencoded' \
+  --data-urlencode 'grant_type=client_credentials' \
+  --data-urlencode 'client_id=<client-id>' \
+  --data-urlencode 'client_secret=<client-secret>' \
+  --data-urlencode 'scope=openid offline_access user_data vehicle_device_data vehicle_location vehicle_cmds vehicle_charging_cmds' \
+  --data-urlencode 'audience=https://fleet-api.prd.cn.vn.cloud.tesla.cn' \
+  | python3 -c 'import sys,json;print(json.load(sys.stdin)["access_token"])')
+
+# 重新注册（Tesla 会拉当前托管公钥覆盖旧记录）
+curl -X POST 'https://fleet-api.prd.cn.vn.cloud.tesla.cn/api/1/partner_accounts' \
+  -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+  -d '{"domain":"<pairing-domain>"}'
+
+# 验证：此处返回的 public_key 应等于域名托管的公钥
+curl -H "Authorization: Bearer $TOKEN" \
+  'https://fleet-api.prd.cn.vn.cloud.tesla.cn/api/1/partner_accounts/public_key?domain=<pairing-domain>'
+```
+
+重注册不影响已配对车辆，但已用旧钥配对的车会拒绝新钥签名——需在车机“锁屏”删旧钥匙、重新走 `tesla.cn/_ak/<domain>` 配对。
+
+### 其他“未注册”排查
+
+App 的 412 自动重注册只在拉车/发指令时触发，配对页在它之前——换钥场景必须手工跑上面的 curl。若三方公钥已一致仍报错：
+
+- 重开 Tesla App 清配对页缓存再扫
+- 手机别在与托管服务器同内网时配对（DDNS 场景已知坑）
+- developer.tesla.cn 应用 allowed_origins 须含 `<pairing-domain>`
+
 ## 首次设置（两步向导）
 
 1. **登录**：OAuth 授权一次（auth.tesla.cn，中国区账号），token 存 Keychain 自动刷新。

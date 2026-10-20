@@ -38,6 +38,8 @@ public final class CommandExecutor: ObservableObject {
 
     private var lastCommand: VehicleCommand?
     private var lastVehicleID: String?
+    /// 成功提示 5s 自动清除的任务句柄。
+    private var clearTask: Task<Void, Never>?
 
     /// 默认 10 次 × 2 秒的 wake 等待（ticket：bounded attempts, e.g. 10×2s）。
     public init(
@@ -58,12 +60,29 @@ public final class CommandExecutor: ObservableObject {
         lastCommand = command
         lastVehicleID = vehicleID
         await run(command: command, vehicleID: vehicleID)
+        scheduleSuccessAutoClear()
     }
 
     /// 重发上一条指令（状态行的重试入口）；没有可重试的指令时保持原状态。
     public func retry() async {
         guard let command = lastCommand, let vehicleID = lastVehicleID else { return }
         await run(command: command, vehicleID: vehicleID)
+        scheduleSuccessAutoClear()
+    }
+
+    /// 成功提示 5s 自动消失（失败保留，等用户处理）。
+    private func scheduleSuccessAutoClear() {
+        clearTask?.cancel()
+        guard status == .succeeded else { return }
+        clearTask = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(5))
+            guard !Task.isCancelled else { return }
+            self?.clearIfStillSucceeded()
+        }
+    }
+
+    private func clearIfStillSucceeded() {
+        if status == .succeeded { status = .idle }
     }
 
     private func run(command: VehicleCommand, vehicleID: String) async {
