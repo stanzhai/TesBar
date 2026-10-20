@@ -42,7 +42,7 @@ struct CommandExecutorTests {
         let notifier = SpyNotifier()
         let executor = CommandExecutor(client: client, notifier: notifier)
 
-        await executor.execute(.hvacOn(temperatureC: 21), vehicleID: "V1")
+        await executor.execute(.hvacOn, vehicleID: "V1")
 
         guard case .failed(let reason, let retryable) = executor.status else {
             Issue.record("expected failed status, got \(executor.status)")
@@ -62,11 +62,11 @@ struct CommandExecutorTests {
         let notifier = SpyNotifier()
         let executor = CommandExecutor(client: client, notifier: notifier)
 
-        await executor.execute(.hvacOn(temperatureC: 21), vehicleID: "V1")
+        await executor.execute(.hvacOn, vehicleID: "V1")
         await executor.retry()
 
         let commands = await client.sentCommands
-        #expect(commands == [.hvacOn(temperatureC: 21), .hvacOn(temperatureC: 21)])
+        #expect(commands == [.hvacOn, .hvacOn])
         #expect(executor.status == .succeeded)
     }
 

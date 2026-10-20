@@ -137,7 +137,7 @@ public struct VehicleSnapshot: Sendable, Equatable, Codable {
 /// One in-app command; each case carries its payload.
 /// Sent via ``TeslaClient/signAndSend(command:)`` (wake/online handled upstream, ADR-0001).
 public enum VehicleCommand: Sendable, Equatable {
-    case hvacOn(temperatureC: Double)
+    case hvacOn
     case hvacOff
     case defrost(on: Bool)
     case horn

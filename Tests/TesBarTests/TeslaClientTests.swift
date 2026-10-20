@@ -25,7 +25,7 @@ import Testing
     let entry = try JSONDecoder().decode(VehicleListEntry.self, from: Data(#"{"id":"123","name":"My Tesla"}"#.utf8))
     #expect(entry == VehicleListEntry(id: "123", name: "My Tesla"))
 
-    #expect(VehicleCommand.hvacOn(temperatureC: 21.0) == .hvacOn(temperatureC: 21.0))
+    #expect(VehicleCommand.hvacOn == .hvacOn)
     #expect(VehicleCommand.setChargeLimit(percent: 80).isDangerous == false)
     #expect(VehicleCommand.doorOpen(.trunk).isDangerous)
 }

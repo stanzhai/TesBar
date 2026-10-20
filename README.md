@@ -2,6 +2,8 @@
 
 macOS 菜单栏应用：查看 Tesla 车辆状态、发送控制指令。原生 SwiftUI `MenuBarExtra`（无 Dock 图标，`LSUIElement`），数据走 Fleet API 轮询、指令走 VCP（Vehicle Command Protocol）签名直发。单账号多车，菜单内切换。
 
+![](./docs/screenshot.png)
+
 ## 环境要求
 
 - macOS 13+

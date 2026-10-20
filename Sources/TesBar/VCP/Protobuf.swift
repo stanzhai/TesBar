@@ -442,7 +442,6 @@ func encodeVCSECUnsignedMessage(rkeAction: RKEAction? = nil, closureMove: VCSECC
 /// honkHorn=27, sentryMode=30, chargePortDoorOpen=62, chargePortDoorClose=61.
 enum CarServerAction: Equatable, Sendable {
     case hvacAuto(powerOn: Bool)
-    case hvacOnWithTemperature(celsius: Float)
     case hvacPreconditioningMax(on: Bool)
     case hvacBioweapon(on: Bool)
     case hvacSeatHeater(seat: Seat, level: Int)
@@ -464,14 +463,6 @@ enum CarServerAction: Equatable, Sendable {
             switch self {
             case let .hvacAuto(powerOn):
                 w.writeField(10) { $0.writeField(1, bool: powerOn) }
-            case let .hvacOnWithTemperature(celsius):
-                // Two nested actions in ONE VehicleAction message: hvacAutoAction{on=true}
-                // then hvacTemperatureAdjustmentAction — order preserved by field order.
-                w.writeField(10) { $0.writeField(1, bool: true) }
-                w.writeField(14) { w in
-                    w.writeField(6, float: celsius)
-                    w.writeField(7, float: celsius)
-                }
             case let .hvacPreconditioningMax(on):
                 w.writeField(12) { $0.writeField(1, bool: on) }
             case let .hvacBioweapon(on):

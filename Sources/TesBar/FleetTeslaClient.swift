@@ -277,12 +277,9 @@ public actor FleetTeslaClient: TeslaClient {
         case .doorOpen, .doorClose:
             throw FleetError.unsupportedCommand("individual doors cannot be actuated remotely")
         // Infotainment
-        case let .hvacOn(temp):
-            // research §5: auto_conditioning_start → hvacAutoAction.powerOn, set_temps →
-            // hvacTemperatureAdjustmentAction. 一键开+设温 = powerOn 先行，temperature 跟上，
-            // 只发温度可能不启动空调。
-            return (.infotainment, CarServerAction.hvacOnWithTemperature(
-                celsius: Float(temp)).encoded())
+        case .hvacOn:
+            // research §5: auto_conditioning_start → hvacAutoAction.powerOn.
+            return (.infotainment, CarServerAction.hvacAuto(powerOn: true).encoded())
         case .hvacOff:
             return (.infotainment, CarServerAction.hvacAuto(powerOn: false).encoded())
         case let .defrost(on):

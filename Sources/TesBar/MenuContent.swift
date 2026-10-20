@@ -33,13 +33,14 @@ struct MenuContent: View {
             if needsSetup {
                 SetupEntry(services: services)
             } else {
-                VStack(alignment: .leading, spacing: 10) {
+                HStack(alignment: .firstTextBaseline) {
                     vehiclePicker
-                    StatusCard(store: services.store, settings: settings, listState: selectedState)
-                    CommandCards(services: services, listState: selectedState)
+                    Spacer(minLength: 8)
+                    statusBadge
                 }
+                StatusCard(store: services.store, settings: settings, listState: selectedState)
+                CommandCards(services: services, listState: selectedState)
             }
-            statusLine
             HStack {
                 Button("设置…") {
                     // 面板挂 sheet 会把 popover 管线打死（同 cb9307e 向导问题）：
@@ -58,8 +59,12 @@ struct MenuContent: View {
         }
         .padding(12)
         .frame(width: 340)
+        .background(PanelCornerKeeper())
     }
+}
 
+@available(macOS 14, *)
+extension MenuContent {
     private var vehiclePicker: some View {
         Menu {
             ForEach(services.store.vehicles, id: \.id) { vehicle in
@@ -83,31 +88,43 @@ struct MenuContent: View {
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    @ViewBuilder private var statusLine: some View {
+    /// 车辆名称行右端的状态徽标：发送中/已发送/指令失败原因/数据获取错误。
+    /// 长原因换行展示；与车辆名同占首行（错误时面板被撑高，属预期）。
+    @ViewBuilder private var statusBadge: some View {
         switch executor.status {
         case .idle:
-            EmptyView()
+            // 睡眠/离线的取数失败是预期行为（isOnline 守卫旁路的 408/超时），
+            // 状态卡的"数据为 X 前"角标已覆盖，不重复报错。
+            if let error = services.store.error, selectedState != "asleep" && selectedState != "offline" {
+                Label(error, systemImage: "exclamationmark.triangle")
+                    .font(.caption2).foregroundStyle(.red)
+                    .multilineTextAlignment(.trailing)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
         case .sending:
-            HStack(spacing: 6) {
-                ProgressView().controlSize(.small)
-                Text("发送中…").font(.caption).foregroundStyle(.secondary)
+            HStack(spacing: 4) {
+                ProgressView().controlSize(.mini)
+                Text("发送中…").font(.caption2).foregroundStyle(.secondary)
             }
         case .succeeded:
-            Label("已发送", systemImage: "checkmark.circle").font(.caption).foregroundStyle(.green)
+            Label("已发送", systemImage: "checkmark.circle")
+                .font(.caption2).foregroundStyle(.green)
         case .failed(let reason, let retryable):
-            HStack(alignment: .top) {
+            HStack(alignment: .top, spacing: 4) {
                 Label {
                     Text(reason)
                         // 指令失败原因可能很长（带 API 响应体），允许完整换行。
-                        .font(.caption).foregroundStyle(.red)
+                        .font(.caption2).foregroundStyle(.red)
+                        .multilineTextAlignment(.trailing)
                         .fixedSize(horizontal: false, vertical: true)
                 } icon: {
                     Image(systemName: "exclamationmark.triangle")
-                        .font(.caption).foregroundStyle(.red)
+                        .font(.caption2).foregroundStyle(.red)
                 }
                 if retryable {
                     Button("重试") { Task { await executor.retry() } }
-                        .controlSize(.small)
+                        .controlSize(.mini)
+                        .font(.caption2)
                 }
             }
         }
@@ -252,16 +269,6 @@ struct StatusCard: View {
                 sleepingCard
             } else {
                 emptyState
-            }
-            // 睡眠/离线的取数失败是预期行为（isOnline 守卫旁路的 408/超时），
-            // 旧数据角标已提示"数据为 X 前"，不再重复报错。
-            if let error = store.error, store.snapshot != nil,
-               listState != "asleep" && listState != "offline" {
-                // 错误原文常含长 token/URL（无空格可断），默认单行截断；
-                // fixedSize 允许纵向展开，逐字符换行显示完整原因。
-                Text(error)
-                    .font(.caption2).foregroundStyle(.red)
-                    .fixedSize(horizontal: false, vertical: true)
             }
         }
         .task {
@@ -468,7 +475,7 @@ struct StatusCard: View {
     private var emptyState: some View {
         VStack(spacing: 10) {
             Image(systemName: "car").font(.largeTitle).foregroundStyle(.tertiary)
-            Text(store.error ?? "暂无数据")
+            Text("暂无数据")
                 .font(.callout).foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
                 .fixedSize(horizontal: false, vertical: true)
@@ -589,8 +596,6 @@ struct CommandCards: View {
     /// 选中车 list state：睡眠时卡片状态未知（发令仍可，executor 自动唤醒）。
     let listState: String
 
-    @State private var hvacTemp: Double = 21
-
     private var sleeping: Bool { listState == "asleep" || listState == "offline" }
 
     var body: some View {
@@ -612,7 +617,7 @@ struct CommandCards: View {
                 subtitle: hvacSubtitle,
                 isOn: hvacOn,
                 tint: .orange
-            ) { send(hvacOn == true ? .hvacOff : .hvacOn(temperatureC: hvacTemp)) }
+            ) { send(hvacOn == true ? .hvacOff : .hvacOn) }
             ToggleCard(
                 icon: "eye.fill",
                 title: "哨兵",
@@ -651,8 +656,8 @@ struct CommandCards: View {
     }
 
     private var hvacSubtitle: String {
-        if sleeping { return "需唤醒 · \(Int(hvacTemp))°C" }
-        return hvacOn == true ? "开启中 \(Int(hvacTemp))°C" : "设定 \(Int(hvacTemp))°C"
+        if sleeping { return "需唤醒" }
+        return hvacOn == true ? "开启中" : "已关闭"
     }
 
     private var sentryOn: Bool? {
@@ -684,4 +689,67 @@ struct CommandCards: View {
             }
         }
     }
+}
+
+// MARK: - 面板圆角保活（issue 13 同族缺陷）
+
+/// MenuBarExtra(.window) 面板内容在打开期间高度跳变（睡眠降级卡 ↔ 快照 hero+地图）
+/// 触发 live resize，SwiftUI 会丢 popover 圆角/材质 mask → 矩形。零尺寸锚点挂窗口上，
+/// 每次 frame/resize/重开后重设 contentView layer 的圆角。
+@available(macOS 14, *)
+private struct PanelCornerKeeper: NSViewRepresentable {
+    final class KeeperView: NSView {
+        private var observed: NSWindow?
+
+        override func viewWillMove(toWindow newWindow: NSWindow?) {
+            super.viewWillMove(toWindow: newWindow)
+            NotificationCenter.default.removeObserver(self)
+            observed = newWindow
+            guard let window = newWindow else { return }
+            arm(window)
+            startObserving(window)
+            reapply(on: window)
+            // resize 后 SwiftUI 可能整套换 contentView 子树，下一帧兜底再刷。
+            Task { @MainActor in
+                guard let window = self.observed else { return }
+                self.arm(window)
+                self.reapply(on: window)
+            }
+        }
+
+        private func arm(_ window: NSWindow) {
+            window.contentView?.wantsLayer = true
+            // frameDidChange 默认不发通知，必须显式打开。
+            window.contentView?.postsFrameChangedNotifications = true
+        }
+
+        private func startObserving(_ window: NSWindow) {
+            let nc = NotificationCenter.default
+            nc.addObserver(self, selector: #selector(refresh),
+                           name: NSView.frameDidChangeNotification, object: window.contentView)
+            nc.addObserver(self, selector: #selector(refresh),
+                           name: NSWindow.didResizeNotification, object: window)
+            // 面板关闭重开（popover 重启）也要重设。
+            nc.addObserver(self, selector: #selector(refresh),
+                           name: NSWindow.didBecomeKeyNotification, object: window)
+        }
+
+        @objc private func refresh() {
+            MainActor.assumeIsolated {
+                guard let window = observed else { return }
+                arm(window)
+                reapply(on: window)
+            }
+        }
+
+        private func reapply(on window: NSWindow) {
+            guard let layer = window.contentView?.layer else { return }
+            layer.masksToBounds = true
+            layer.cornerRadius = 10
+        }
+
+        deinit { NotificationCenter.default.removeObserver(self) }
+    }
+    func makeNSView(context: Context) -> KeeperView { KeeperView() }
+    func updateNSView(_ nsView: KeeperView, context: Context) {}
 }

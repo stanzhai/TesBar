@@ -371,12 +371,12 @@ struct FleetTeslaClientTests {
         #expect(transport.signedCommandCalls.isEmpty)  // rejected before any POST
     }
 
-    @Test func hvacOnMapsToAutoStartPlusTemperatureBothZones() async throws {
-        let (msg, _, _) = try await runCommand(.hvacOn(temperatureC: 21))
+    @Test func hvacOnMapsToHvacAutoOn() async throws {
+        let (msg, _, _) = try await runCommand(.hvacOn)
         #expect(msg.toDomain == .infotainment)
-        #expect(try Self.vehicleActionField(msg.payload!, 10) != Data())  // hvacAuto{on=true}
-        let temps = try Self.hvacTemperatures(msg.payload!)
-        #expect(temps.driver == 21 && temps.passenger == 21)
+        // vehicleAction(2){ hvac_auto(10){ power_on=true } }, no temperature action.
+        #expect(try Self.vehicleActionField(msg.payload!, 10) == Data([0x08, 0x01]))
+        #expect(try Self.vehicleActionField(msg.payload!, 14) == nil)
     }
 
     @Test func hvacOffMapsToHvacAutoOff() async throws {
@@ -656,19 +656,6 @@ struct FleetTeslaClientTests {
         try subMessage(try #require(try subMessage(payload, field: 2)), field: field)
     }
 
-    static func hvacTemperatures(_ payload: Data) throws -> (driver: Float, passenger: Float) {
-        let hvac = try #require(try vehicleActionField(payload, 14))
-        var r = ProtobufReader(hvac)
-        var d: Float = 0, p: Float = 0
-        try r.forEachField { r, f, wt in
-            switch (f, wt) {
-            case (6, 5): d = try r.readFloat()
-            case (7, 5): p = try r.readFloat()
-            default: try r.skip(wireType: wt)
-            }
-        }
-        return (d, p)
-    }
 
     /// SignatureData → HMAC_PERSONALIZED(8){ counter(2) / epoch(1) }.
     static func commandCounter(_ signatureData: Data) throws -> UInt32 {
