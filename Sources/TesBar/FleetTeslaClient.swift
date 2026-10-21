@@ -2,7 +2,7 @@ import Foundation
 import Security
 import os
 
-public enum FleetError: Error, Equatable, Sendable {
+public enum FleetError: Error, Equatable, Sendable, LocalizedError {
     /// HTTP 422 — vehicle/fleet does not support the VCP signed_command protocol.
     case protocolUnsupported
     /// Vehicle asleep or offline (HTTP 503, or 408 + "vehicle is offline").
@@ -15,6 +15,26 @@ public enum FleetError: Error, Equatable, Sendable {
     case noVehicle
     /// Handshake reply did not verify or a reply body was malformed.
     case malformedResponse
+}
+
+public extension FleetError {
+    /// 人类可读中文文案（spec 故事 28/32）。VCP 故障名等英文术语保留。
+    var errorDescription: String? {
+        switch self {
+        case .protocolUnsupported:
+            return "车辆或车队不支持签名指令协议，无法远程控制。"
+        case .vehicleNotAwake:
+            return "车辆休眠或离线，暂无法获取数据或发送指令。"
+        case .vehicleRejected(let fault):
+            return "车辆拒绝了指令（\(fault)）。"
+        case .unsupportedCommand(let reason):
+            return "暂不支持该操作：\(reason)"
+        case .noVehicle:
+            return "未找到车辆，请刷新后重试。"
+        case .malformedResponse:
+            return "车辆响应异常，请稍后重试。"
+        }
+    }
 }
 
 /// Production `TeslaClient` over the Fleet API (ticket 05).

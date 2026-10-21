@@ -142,6 +142,17 @@ public enum StatusFormatting {
         }
     }
 
+    /// 纯时长："3 小时"（休眠/离线状态行用，"休眠 3 小时"）。分桶同 updatedAgo。
+    public static func durationAgo(_ seconds: TimeInterval) -> String {
+        let s = max(0, Int(seconds))
+        switch s {
+        case ..<60: return "1 分钟"
+        case ..<3600: return "\(s / 60) 分钟"
+        case ..<86400: return "\(s / 3600) 小时"
+        default: return "\(s / 86400) 天"
+        }
+    }
+
     /// °C/°F 显示：华氏换算并四舍五入；nil 保持 nil（睡眠/离线无温度）。
     public static func temp(celsius: Double?, fahrenheit: Bool) -> String? {
         guard let celsius else { return nil }

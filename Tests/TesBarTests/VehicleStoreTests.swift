@@ -57,6 +57,8 @@ private actor FakeTeslaClient: TeslaClient {
 
     var list: [VehicleListEntry]
     var snapshots: [VehicleSnapshot]
+    var failNextData: (any Error)?
+
 
     init(list: [VehicleListEntry], snapshots: [VehicleSnapshot]) {
         self.list = list
@@ -70,9 +72,15 @@ private actor FakeTeslaClient: TeslaClient {
 
     func vehicleData(id: String) async throws -> VehicleSnapshot {
         dataCalls.append(id)
+        if let failure = failNextData {
+            failNextData = nil
+            throw failure
+        }
         if snapshots.count > 1 { snapshots.removeFirst() }
         return snapshots[0]
     }
+
+    func setFailNextData(_ error: any Error) { failNextData = error }
 
     func setSnapshots(_ s: [VehicleSnapshot]) { snapshots = s }
 
@@ -223,6 +231,27 @@ private func settle() async { try? await Task.sleep(nanoseconds: 50_000_000) }
     #expect(store.snapshot == nil)
     #expect(store.error == nil)
     #expect(store.isLoading == false)
+}
+
+/// 车刚睡着但 list state 滞后（online/""）→ vehicle_data 503 (vehicleNotAwake)。
+/// 回写 state=asleep：旧快照 + zzz 角标接管，不弹英文系统报错。
+@available(macOS 14, *) @MainActor @Test func staleOnlineStateSurfacesAsSleepingOnNotAwake() async throws {
+    let (store, _, client) = await makeStore(
+        snapshots: [snapshot(state: .online)], defaults: isolatedDefaults()
+    )
+    await store.menuOpened()
+    await store.awaitPendingLoadsForTest()
+    #expect(store.snapshot?.state == .online) // 有过一次成功取数
+
+    // 车睡了：list 仍报 online（缓存滞后），vehicle_data 变 503。
+    await client.setFailNextData(FleetError.vehicleNotAwake)
+    await store.refreshAfterCommand() // force 拉数路径
+    #expect(store.error == nil) // 不是红字英文报错
+    #expect(store.snapshot?.state == .online) // 旧快照保留
+    #expect(store.vehicles.first?.state == "asleep") // list state 已纠正
+
+    await store.menuOpened() // 再次打开：isOnline 守卫生效，不再打 vehicle_data
+    #expect(await client.dataCalls.count == 2) // 初次成功 + 503 那次；守卫生效后不再加
 }
 
 

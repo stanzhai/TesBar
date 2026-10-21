@@ -129,6 +129,14 @@ struct MenuLogicTests {
         #expect(StatusFormatting.updatedAgo(3 * 86400) == "3 天前更新")
     }
 
+    @Test func durationAgoLabel() {
+        #expect(StatusFormatting.durationAgo(30) == "1 分钟")
+        #expect(StatusFormatting.durationAgo(90) == "1 分钟")
+        #expect(StatusFormatting.durationAgo(3 * 60) == "3 分钟")
+        #expect(StatusFormatting.durationAgo(3 * 3600) == "3 小时")
+        #expect(StatusFormatting.durationAgo(3 * 86400) == "3 天")
+    }
+
     // MARK: - Temperature unit (故事 37)
 
     @Test func celsiusToFahrenheitDisplay() {

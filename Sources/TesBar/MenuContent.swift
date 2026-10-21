@@ -249,21 +249,7 @@ struct StatusCard: View {
                 batterySection(snapshot)
                 if let pos = snapshot.position { mapCard(pos) }
                 else if snapshot.positionError != nil { positionErrorCard(snapshot.positionError!) }
-                // 旧数据保留显示（方案 1）：车睡眠/离线但还有上次快照时，
-                // 不清数据，只提示数据是旧的 + 车辆状态。
-                if listState == "asleep" || listState == "offline" {
-                    let label = listState == "offline" ? "车辆离线" : "车辆睡眠中"
-                    if let updated = store.lastUpdated {
-                        Label(
-                            "\(label) · 数据为 \(StatusFormatting.updatedAgo(now.timeIntervalSince(updated)))",
-                            systemImage: "zzz"
-                        )
-                        .font(.caption2).foregroundStyle(.secondary)
-                    } else {
-                        Label(label, systemImage: "zzz")
-                            .font(.caption2).foregroundStyle(.secondary)
-                    }
-                }
+                // 睡眠/离线状态并入电量条右下角更新时间（agoLabel），此处不再单列。
             } else if store.isLoading || store.isWaking {
                 HStack(spacing: 8) {
                     ProgressView().controlSize(.small)
@@ -358,18 +344,20 @@ struct StatusCard: View {
         .frame(height: 8)
     }
 
-    /// 电量条区：电量条，左下角充电枪状态，右下角更新时间。
+    /// 电量条区：电量条，左下角充电枪状态，右下角时间角标（睡眠/离线带状态前缀和图标）。
     private func batterySection(_ s: VehicleSnapshot) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             batteryBar(s)
             HStack(alignment: .firstTextBaseline) {
                 chargingRow(s)
                 Spacer()
-                Text(agoText).font(.caption2).foregroundStyle(.tertiary)
+                if !agoLabel.isEmpty {
+                    Label(agoLabel, systemImage: agoIcon)
+                        .font(.caption2).foregroundStyle(.tertiary)
+                }
             }
         }
     }
-
     /// 充电枪插入状态（电量条左下角，原 hero 第三行）：充电中绿色 + bolt。
     private func chargingRow(_ s: VehicleSnapshot) -> some View {
         let charging = s.charge.state == "Charging"
@@ -381,9 +369,26 @@ struct StatusCard: View {
         .foregroundStyle(charging ? Color.green : Color.secondary)
     }
 
-    private var agoText: String {
-        guard let updated = store.lastUpdated else { return "" }
-        return StatusFormatting.updatedAgo(now.timeIntervalSince(updated))
+    /// 右下角时间角标：正常 = "3 小时前更新"；睡眠/离线 = 状态 + 距上次数据时长；
+    /// 无任何数据 + 离线 = "车辆离线"。
+    private var agoLabel: String {
+        guard let updated = store.lastUpdated else {
+            return listState == "offline" ? "车辆离线" : ""
+        }
+        switch listState {
+        case "asleep": return "休眠 \(StatusFormatting.durationAgo(now.timeIntervalSince(updated)))"
+        case "offline": return "离线 \(StatusFormatting.durationAgo(now.timeIntervalSince(updated)))"
+        default: return StatusFormatting.updatedAgo(now.timeIntervalSince(updated))
+        }
+    }
+
+    /// 状态图标：睡眠 zzz / 离线（车不在服务区）/ 正常时钟。
+    private var agoIcon: String {
+        switch listState {
+        case "asleep": "zzz"
+        case "offline": "antenna.radiowaves.left.and.right.slash"
+        default: "clock"
+        }
     }
 
     /// 地图卡：MapKit 静态快照，车在中心；底部反向地理编码地址行（拿不到时退坐标）。

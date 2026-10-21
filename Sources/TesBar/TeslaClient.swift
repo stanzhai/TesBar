@@ -19,7 +19,7 @@ public struct VehicleListEntry: Sendable, Equatable, Codable {
     public let vin: String
     /// Fleet API list state: `online` / `asleep` / `offline`（ADR-0004：睡眠车默认
     /// 不取 vehicle_data，state 决定 UI 是否显示降级卡）。
-    public let state: String
+    public var state: String
 
     /// 旧持久化/测试 JSON 缺 `vin`/`state` 时按空串解码（union-merge 安全）；
     /// 真实 Fleet API `GET /api/1/vehicles` 响应始终携带。

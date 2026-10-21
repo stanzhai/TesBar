@@ -145,6 +145,12 @@ public final class VehicleStore: @unchecked Sendable {
                 snapshot = fresh
                 lastUpdated = await clock.now()
                 self.error = nil
+            } catch FleetError.vehicleNotAwake {
+                // 车刚睡着但 list state 还是 online/""（缓存滞后）→ 503。
+                // 数据端点比 list 新：回写 asleep，整套睡眠降级 UI（zzz 角标、
+                // 唤醒按钮、不报错）自然接管，不再弹英文系统报错。
+                guard !Task.isCancelled else { return }
+                markAsleep(id)
             } catch {
                 guard !Task.isCancelled else { return }
                 self.error = Self.describe(error)
@@ -247,6 +253,13 @@ public final class VehicleStore: @unchecked Sendable {
     private func isOnline(_ id: String) -> Bool {
         guard let entry = vehicles.first(where: { $0.id == id }) else { return false }
         return entry.state.isEmpty || entry.state == "online"
+    }
+
+    /// 把指定车的 list state 回写为 `asleep`：vehicle_data 已证实车不在线，
+    /// list 的 online/"" 是缓存滞后。降级卡、轮询守卫随之生效。
+    private func markAsleep(_ id: String) {
+        guard let index = vehicles.firstIndex(where: { $0.id == id }) else { return }
+        vehicles[index].state = "asleep"
     }
 
     private func pollLoop() async {
