@@ -405,6 +405,9 @@ struct StatusCard: View {
             .mapStyle(.standard)
             .frame(height: 120)
             .clipShape(RoundedRectangle(cornerRadius: 10))
+            // Map(initialPosition:) 只在首次创建生效，LocationText 的 @State 地址
+            // 也会缓存——坐标变了必须换 identity 重建（issue：手动刷新位置不动）。
+            .id("\(pos.latitude),\(pos.longitude)")
             Button {
                 // saddr 缺省 = 地图 app 用当前位置；daddr= 目的地（GCJ 坐标直接传，
                 // 中国版 Maps 底图同坐标系）。系统按默认地图 app 打开。
@@ -448,8 +451,9 @@ struct StatusCard: View {
                 .underline(linkLook, pattern: .solid)
                 .lineLimit(1)
                 .truncationMode(.middle)
-                .task {
-                    guard address == nil else { return }
+                .task(id: "\(coord.latitude),\(coord.longitude)") {
+                    // 坐标变了重查地址（.task(id:) 触发即重置）；同坐标只查一次。
+                    address = nil
                     let placer = CLLocation(latitude: coord.latitude, longitude: coord.longitude)
                     if let marks = try? await CLGeocoder().reverseGeocodeLocation(placer),
                        let m = marks.first {

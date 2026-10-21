@@ -38,6 +38,7 @@ public final class VehicleStore: @unchecked Sendable {
 
     private static let chargingInterval: TimeInterval = 60
     private static let idleInterval: TimeInterval = 15 * 60
+    private static let drivingInterval: TimeInterval = 60
     private static let selectedIDKey = "selectedVehicleID"
 
     private let client: any TeslaClient
@@ -264,9 +265,14 @@ public final class VehicleStore: @unchecked Sendable {
 
     private func pollLoop() async {
         while !Task.isCancelled {
-            let charging = snapshot?.charge.state == "Charging"
+            // 行驶中 60s（位置/电量持续变化，车醒着，不违反 ADR-0001 不吵睡眠车）；
+            // 充电 60s；其余 15 分钟。
+            let interval: TimeInterval
+            if snapshot?.driving == true { interval = Self.drivingInterval }
+            else if snapshot?.charge.state == "Charging" { interval = Self.chargingInterval }
+            else { interval = Self.idleInterval }
             do {
-                try await clock.sleep(for: charging ? Self.chargingInterval : Self.idleInterval)
+                try await clock.sleep(for: interval)
             } catch {
                 return // stopPolling()
             }

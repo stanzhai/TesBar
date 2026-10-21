@@ -94,7 +94,7 @@ private actor FakeTeslaClient: TeslaClient {
 // MARK: - Fixtures
 
 private func snapshot(
-    state: VehicleSnapshot.State, charging: Bool = false, locked: Bool = true
+    state: VehicleSnapshot.State, charging: Bool = false, locked: Bool = true, driving: Bool = false
 ) -> VehicleSnapshot {
     VehicleSnapshot(
         charge: .init(
@@ -103,7 +103,8 @@ private func snapshot(
         ),
         climate: .init(insideC: 21.5, outsideC: 8.0),
         doors: .init(locked: locked, frontTrunkOpen: false, rearTrunkOpen: false),
-        odometerKm: 12_834.2, state: state, timestampMs: 1_760_000_000_000
+        odometerKm: 12_834.2, state: state, driving: driving,
+        timestampMs: 1_760_000_000_000
     )
 }
 
@@ -177,6 +178,30 @@ private func settle() async { try? await Task.sleep(nanoseconds: 50_000_000) }
     await yieldUntilPending(clock)
     await clock.advance(60)
     await waitForDataCalls(client, callsAtOpen + 2)
+    store.stopPolling()
+}
+
+/// 行驶中 60s 一拉（位置自动跟上），停车后回 15 分钟档。
+@available(macOS 14, *) @MainActor @Test func drivingPollsEvery60Seconds() async throws {
+    let (store, clock, client) = await makeStore(
+        snapshots: [snapshot(state: .online, driving: true)], defaults: isolatedDefaults()
+    )
+    await store.menuOpened()
+    store.startPolling()
+    let callsAtOpen = await client.dataCalls.count
+
+    await yieldUntilPending(clock)
+    await clock.advance(60)
+    await waitForDataCalls(client, callsAtOpen + 1) // 60s 已拉，不等 900s
+
+    // 停车：fake 单快照队列，下次拉取才返回 parked——第一轮 60s 拉到 driving（+1），
+    // 再 60s 拉到 parked（+2），之后进 900s 档，剩余 240s 不再拉。
+    await client.setSnapshots([snapshot(state: .online)])
+    await yieldUntilPending(clock)
+    await clock.advance(300)
+    await waitForDataCalls(client, callsAtOpen + 2)
+    await settle()
+    #expect(await client.dataCalls.count == callsAtOpen + 2)
     store.stopPolling()
 }
 

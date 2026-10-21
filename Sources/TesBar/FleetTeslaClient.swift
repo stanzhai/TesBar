@@ -15,6 +15,9 @@ public enum FleetError: Error, Equatable, Sendable, LocalizedError {
     case noVehicle
     /// Handshake reply did not verify or a reply body was malformed.
     case malformedResponse
+    /// HTTP 412: partner account not registered — internal marker, handled by
+    /// `withPartnerRegistration` (registers + retries); never surfaces to UI.
+    case unregistered412
 }
 
 public extension FleetError {
@@ -33,6 +36,8 @@ public extension FleetError {
             return "未找到车辆，请刷新后重试。"
         case .malformedResponse:
             return "车辆响应异常，请稍后重试。"
+        case .unregistered412:
+            return "Fleet API 返回 HTTP 412：账户未注册。"
         }
     }
 }
@@ -51,6 +56,7 @@ public actor FleetTeslaClient: TeslaClient {
     private let keys: VCPKeyManager
     private let defaults: UserDefaults
     private let logger = Logger(subsystem: "com.tesbar.app", category: "fleet-client")
+    private struct PartnerDomainBody: Encodable { let domain: String }
     /// Per-VIN session managers. Sessions persist to UserDefaults; this map is only the
     /// in-process warm cache of managers.
     private var sessionManagers: [String: VCPSessionManager] = [:]
@@ -343,52 +349,61 @@ public actor FleetTeslaClient: TeslaClient {
     }
 
     private func get(path: String, query: [(String, String)] = []) async throws -> Data {
-        let r = try await withPartnerRegistration {
-            try await self.auth.authorized { try await self.send(path: path, query: query, body: nil) }
+        // mapStatus 必须在 authorized 闭包内：401 以 HTTPStatusError 抛出
+        // 才触发 refresh+retry（GET 401 曾直接报 token expired 给 UI）。
+        let r: Data = try await withPartnerRegistration {
+            try await self.auth.authorized {
+                let r = try await self.send(path: path, query: query, body: nil)
+                _ = try Self.mapStatus(r.status, r.body)
+                return r.body
+            }
         }
-        _ = try Self.mapStatus(r.status, r.body)
-        return r.body
+        return r
     }
 
     private func post(path: String) async throws -> Data {
-        let r = try await withPartnerRegistration {
-            try await self.auth.authorized { try await self.send(path: path, body: Data("{}".utf8)) }
+        let r: Data = try await withPartnerRegistration {
+            try await self.auth.authorized {
+                let r = try await self.send(path: path, body: Data("{}".utf8))
+                _ = try Self.mapStatus(r.status, r.body)
+                return r.body
+            }
         }
-        _ = try Self.mapStatus(r.status, r.body)
-        return r.body
+        return r
     }
     /// China conventions: 412 = account not registered → register via
     /// `POST /api/1/partner_accounts` (partner token) and retry the call once.
     /// The endpoint resolves the key-hosting domain from the app's allowed_origins
     /// (developer portal); we also send the pairing domain when configured.
-    private func withPartnerRegistration(
-        _ call: @Sendable () async throws -> (status: Int, headers: [String: String], body: Data)
-    ) async throws -> (status: Int, headers: [String: String], body: Data) {
-        let first = try await call()
-        guard first.status == 412 else { return first }
-        logger.notice("412 — registering partner account, then retrying once")
-        let token = try await auth.partnerAccessToken()
-        var request = URLRequest(url: resolver.baseURL.appendingPathComponent("/api/1/partner_accounts"))
-        request.httpMethod = "POST"
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-        if let domain = defaults.string(forKey: "tesbarPairingDomain"),
-           !domain.trimmingCharacters(in: .whitespaces).isEmpty {
-            struct Body: Encodable { let domain: String }
-            request.httpBody = try? JSONEncoder().encode(
-                Body(domain: domain.trimmingCharacters(in: .whitespaces)))
+    private func withPartnerRegistration<T: Sendable>(
+        _ call: @Sendable () async throws -> T
+    ) async throws -> T {
+        do {
+            return try await call()
+        } catch FleetError.unregistered412 {
+            logger.notice("412 — registering partner account, then retrying once")
+            let token = try await auth.partnerAccessToken()
+            var request = URLRequest(url: resolver.baseURL.appendingPathComponent("/api/1/partner_accounts"))
+            request.httpMethod = "POST"
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+            if let domain = defaults.string(forKey: "tesbarPairingDomain"),
+               !domain.trimmingCharacters(in: .whitespaces).isEmpty {
+                request.httpBody = try? JSONEncoder().encode(
+                    PartnerDomainBody(domain: domain.trimmingCharacters(in: .whitespaces)))
+            }
+            let registration = try await transport.send(request)
+            if !(200...299).contains(registration.status) {
+                let snippet = Self.bodySnippet(registration.body) ?? "<empty body>"
+                logger.error("partner_accounts registration → \(registration.status): \(snippet)")
+                let hint = registration.status == 400
+                    ? "（域名未在 developer.tesla.cn 的 allowed_origins 配置，或该域名未托管 /.well-known/appspecific/com.tesla.3p.public-key.pem 公钥）"
+                    : ""
+                throw HTTPStatusError(412, body: "账户注册失败（\(registration.status)）：\(snippet)\(hint)")
+            }
+            logger.notice("partner account registered")
+            return try await call()
         }
-        let registration = try await transport.send(request)
-        if !(200...299).contains(registration.status) {
-            let snippet = Self.bodySnippet(registration.body) ?? "<empty body>"
-            logger.error("partner_accounts registration → \(registration.status): \(snippet)")
-            let hint = registration.status == 400
-                ? "（域名未在 developer.tesla.cn 的 allowed_origins 配置，或该域名未托管 /.well-known/appspecific/com.tesla.3p.public-key.pem 公钥）"
-                : ""
-            throw HTTPStatusError(412, body: "账户注册失败（\(registration.status)）：\(snippet)\(hint)")
-        }
-        logger.notice("partner account registered")
-        return try await call()
     }
 
     /// One request out through the region-aware transport; no status check here — callers
@@ -436,6 +451,7 @@ public actor FleetTeslaClient: TeslaClient {
     private static func mapStatus(_ status: Int, _ body: Data) throws {
         switch status {
         case 200: return
+        case 412: throw FleetError.unregistered412  // partner 账户未注册，外层注册后重试
         case 422: throw FleetError.protocolUnsupported
         case 503: throw FleetError.vehicleNotAwake
         case 408 where body.range(of: Data("vehicle is offline".utf8)) != nil:

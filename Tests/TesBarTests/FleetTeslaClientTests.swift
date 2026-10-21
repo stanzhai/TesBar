@@ -629,6 +629,25 @@ struct FleetTeslaClientTests {
         #expect(transport.signedCommandCalls.count == 3)
     }
 
+    /// GET 路径（listVehicles 等）401 也必须 refresh+retry——mapStatus 曾在
+    /// authorized 闭包外调用，401 直接抛给 UI（"token expired"）。
+    @Test func get401RefreshesAndRetries() async throws {
+        let vehicle = VehicleSim()
+        let transport = FleetScriptedTransport(
+            vehicle: vehicle,
+            auth: [(status: 200, json: #"{"access_token":"at2","refresh_token":"rt2","expires_in":28800}"#)],
+            fleet: [.error(status: 401, body: #"{"error":"token expired"}"#), .json(Self.listJSON)])
+        let (client, store, _) = try makeClient(transport)
+        try store.saveToken("rt1", for: AuthService.refreshAccount)
+
+        let list = try await client.listVehicles()
+
+        #expect(list.count == 1)
+        #expect(try store.readToken(AuthService.refreshAccount) == "rt2")
+        #expect(try store.readToken(AuthService.accessAccount) == "at2")
+        #expect(transport.calls.contains { $0.url.contains("oauth2/v3/token") })
+    }
+
     // MARK: - payload field helpers
 
     /// First varint value of `field` in a protobuf message (nil when absent).
